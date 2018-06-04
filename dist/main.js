@@ -97,6 +97,8 @@
 __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var libui_node__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! libui-node */ "libui-node");
 /* harmony import */ var libui_node__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(libui_node__WEBPACK_IMPORTED_MODULE_0__);
+/* harmony import */ var systeminformation__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! systeminformation */ "./node_modules/systeminformation/lib/index.js");
+/* harmony import */ var systeminformation__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(systeminformation__WEBPACK_IMPORTED_MODULE_1__);
 //
 //
 //
@@ -119,6 +121,18 @@ __webpack_require__.r(__webpack_exports__);
 //
 //
 //
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//
+
 
 
 
@@ -132,18 +146,6777 @@ __webpack_require__.r(__webpack_exports__);
       progress: 50,
       rselected: 'Option 3',
       slider: 20,
-      spinbox: 40
+      spinbox: 40,
+      batteryCycle: 0,
+      batteryPercent: 0,
+      batteryIsCharging: false,
+      batteryUpdateInfo: false
     };
   },
+  mounted() {
+    this.updateDataBattery();
+    this.$options.interval = setInterval(this.updateDataBattery, 10000);
+  },
+  beforeDestroy() {
+    clearTimeout(this.$options.timeout);
+    clearInterval(this.$options.interval);
+  },
   methods: {
+    updateDataBattery() {
+      systeminformation__WEBPACK_IMPORTED_MODULE_1___default.a.battery(data => {
+        this.batteryUpdateInfo = false;
+        this.batteryPercent = data.percent;
+        this.batteryIsCharging = data.ischarging;
+        this.batteryCycle = data.cyclecount;
+
+        this.$options.timeout = setTimeout(() => {
+          this.batteryUpdateInfo = true;
+        }, 1000);
+      });
+    },
     reverse() {
       this.msg = this.msg.split('').reverse().join('');
+    },
+    increase() {
+      if (this.slider < 100) {
+        this.slider++;
+      }
+    },
+    decrease() {
+      if (this.slider != 0) {
+        this.slider--;
+      }
     },
     exit() {
       libui_node__WEBPACK_IMPORTED_MODULE_0___default.a.stopLoop();
     }
   }
 });
+
+/***/ }),
+
+/***/ "./node_modules/systeminformation/lib/battery.js":
+/*!*******************************************************!*\
+  !*** ./node_modules/systeminformation/lib/battery.js ***!
+  \*******************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+// ==================================================================================
+// battery.js
+// ----------------------------------------------------------------------------------
+// Description:   System Information - library
+//                for Node.js
+// Copyright:     (c) 2014 - 2018
+// Author:        Sebastian Hildebrandt
+// ----------------------------------------------------------------------------------
+// License:       MIT
+// ==================================================================================
+// 6. Battery
+// ----------------------------------------------------------------------------------
+
+const exec = __webpack_require__(/*! child_process */ "child_process").exec;
+const fs = __webpack_require__(/*! fs */ "fs");
+const util = __webpack_require__(/*! ./util */ "./node_modules/systeminformation/lib/util.js");
+
+let _platform = process.platform;
+
+const _linux = (_platform === 'linux');
+const _darwin = (_platform === 'darwin');
+const _windows = (_platform === 'win32');
+const _freebsd = (_platform === 'freebsd');
+const _openbsd = (_platform === 'openbsd');
+const _sunos = (_platform === 'sunos');
+
+const opts = {
+  windowsHide: true
+};
+
+module.exports = function (callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      let result = {
+        hasbattery: false,
+        cyclecount: 0,
+        ischarging: false,
+        maxcapacity: 0,
+        currentcapacity: 0,
+        percent: 0,
+        acconnected: true
+      };
+
+      if (_linux) {
+        let battery_path = '';
+        if (fs.existsSync('/sys/class/power_supply/BAT1/status')) {
+          battery_path = '/sys/class/power_supply/BAT1/';
+        } else if (fs.existsSync('/sys/class/power_supply/BAT0/status')) {
+          battery_path = '/sys/class/power_supply/BAT0/';
+        }
+        if (battery_path) {
+          exec('cat ' + battery_path + 'status', function (error, stdout) {
+            if (!error) {
+              let lines = stdout.toString().split('\n');
+              if (lines.length > 0 && lines[0]) result.ischarging = (lines[0].trim().toLowerCase() === 'charging');
+              result.acconnected = result.ischarging;
+            }
+            exec('cat ' + battery_path + 'cyclec_ount', function (error, stdout) {
+              if (!error) {
+                let lines = stdout.toString().split('\n');
+                if (lines.length > 0 && lines[0]) result.cyclecount = parseFloat(lines[0].trim());
+              }
+              exec('cat ' + battery_path + 'charge_full', function (error, stdout) {
+                if (!error) {
+                  let lines = stdout.toString().split('\n');
+                  if (lines.length > 0 && lines[0]) result.maxcapacity = parseFloat(lines[0].trim());
+                }
+                exec('cat ' + battery_path + 'charge_now', function (error, stdout) {
+                  if (!error) {
+                    let lines = stdout.toString().split('\n');
+                    if (lines.length > 0 && lines[0]) result.currentcapacity = parseFloat(lines[0].trim());
+                  }
+                  if (result.maxcapacity && result.currentcapacity) {
+                    result.hasbattery = true;
+                    result.percent = 100.0 * result.currentcapacity / result.maxcapacity;
+                  }
+                  if (callback) { callback(result); }
+                  resolve(result);
+                });
+              });
+            });
+          });
+        } else {
+          if (callback) { callback(result); }
+          resolve(result);
+        }
+      }
+      if (_freebsd || _openbsd) {
+        exec('sysctl hw.acpi.battery hw.acpi.acline', function (error, stdout) {
+          let lines = stdout.toString().split('\n');
+          const batteries = parseInt('0' + util.getValue(lines, 'hw.acpi.battery.units'), 10);
+          const percent = parseInt('0' + util.getValue(lines, 'hw.acpi.battery.life'), 10);
+          result.hasbattery = (batteries > 0);
+          result.cyclecount = -1;
+          result.ischarging = util.getValue(lines, 'hw.acpi.acline') !== '1';
+          result.acconnected = result.ischarging;
+          result.maxcapacity = -1;
+          result.currentcapacity = -1;
+          result.percent = batteries ? percent : -1;
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      }
+
+      if (_darwin) {
+        exec('ioreg -n AppleSmartBattery -r | egrep "CycleCount|IsCharging|MaxCapacity|CurrentCapacity"; pmset -g batt | grep %', function (error, stdout) {
+          if (stdout) {
+            let lines = stdout.toString().replace(/ +/g, '').replace(/"+/g, '').replace(/-/g, '').split('\n');
+            result.cyclecount = parseInt('0' + util.getValue(lines, 'cyclecount', '='), 10);
+            result.maxcapacity = parseInt('0' + util.getValue(lines, 'maxcapacity', '='), 10);
+            result.currentcapacity = parseInt('0' + util.getValue(lines, 'currentcapacity', '='), 10);
+            let percent = -1;
+            const line = util.getValue(lines, 'internal', 'Battery');
+            let parts = line.split(';');
+            if (parts && parts[0]) {
+              let parts2 = parts[0].split('\t');
+              if (parts2 && parts2[1]) {
+                percent = parseFloat(parts2[1].trim().replace('%', ''));
+              }
+            }
+            if (parts && parts[1]) {
+              result.ischarging = (parts[1].trim() === 'charging');
+              result.acconnected = (parts[1].trim() !== 'discharging');
+            } else {
+              result.ischarging = util.getValue(lines, 'ischarging', '=').toLowerCase() === 'yes';
+              result.acconnected = result.ischarging;
+            }
+            if (result.maxcapacity && result.currentcapacity) {
+              result.hasbattery = true;
+              result.percent = percent !== -1 ? percent : Math.round(100.0 * result.currentcapacity / result.maxcapacity);
+            }
+          }
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      }
+      if (_sunos) {
+        if (callback) { callback(result); }
+        resolve(result);
+      }
+      if (_windows) {
+        try {
+          exec(util.getWmic() + ' Path Win32_Battery Get BatteryStatus, DesignCapacity, EstimatedChargeRemaining /value', opts, function (error, stdout) {
+            if (stdout) {
+              let lines = stdout.split('\r\n');
+              let status = util.getValue(lines, 'BatteryStatus', '=').trim();
+              if (status) {
+                status = parseInt(status || '2');
+                result.hasbattery = true;
+                result.maxcapacity = parseInt(util.getValue(lines, 'DesignCapacity', '=') || 0);
+                result.percent = parseInt(util.getValue(lines, 'EstimatedChargeRemaining', '=') || 0);
+                result.currentcapacity = parseInt(result.maxcapacity * result.percent / 100);
+                result.ischarging = (status >= 6 && status <= 9) || (!(status === 3) && !(status === 1) && result.percent < 100);
+                result.acconnected = result.ischarging;
+              }
+            }
+            if (callback) { callback(result); }
+            resolve(result);
+          });
+        } catch (e) {
+          if (callback) { callback(result); }
+          resolve(result);    
+        }
+      }
+    });
+  });
+};
+
+
+/***/ }),
+
+/***/ "./node_modules/systeminformation/lib/cpu.js":
+/*!***************************************************!*\
+  !*** ./node_modules/systeminformation/lib/cpu.js ***!
+  \***************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+// ==================================================================================
+// cpu.js
+// ----------------------------------------------------------------------------------
+// Description:   System Information - library
+//                for Node.js
+// Copyright:     (c) 2014 - 2018
+// Author:        Sebastian Hildebrandt
+// ----------------------------------------------------------------------------------
+// License:       MIT
+// ==================================================================================
+// 4. CPU
+// ----------------------------------------------------------------------------------
+
+const os = __webpack_require__(/*! os */ "os");
+const exec = __webpack_require__(/*! child_process */ "child_process").exec;
+const fs = __webpack_require__(/*! fs */ "fs");
+const util = __webpack_require__(/*! ./util */ "./node_modules/systeminformation/lib/util.js");
+
+let _platform = process.platform;
+
+const _linux = (_platform === 'linux');
+const _darwin = (_platform === 'darwin');
+const _windows = (_platform === 'win32');
+const _freebsd = (_platform === 'freebsd');
+const _openbsd = (_platform === 'openbsd');
+const _sunos = (_platform === 'sunos');
+
+const opts = {
+  windowsHide: true
+};
+
+let _cpu_speed = '0.00';
+let _current_cpu = {
+  user: 0,
+  nice: 0,
+  system: 0,
+  idle: 0,
+  irq: 0,
+  load: 0,
+  tick: 0,
+  ms: 0,
+  currentload: 0,
+  currentload_user: 0,
+  currentload_system: 0,
+  currentload_nice: 0,
+  currentload_idle: 0,
+  currentload_irq: 0,
+  raw_currentload: 0,
+  raw_currentload_user: 0,
+  raw_currentload_system: 0,
+  raw_currentload_nice: 0,
+  raw_currentload_idle: 0,
+  raw_currentload_irq: 0
+};
+let _cpus = [];
+let _corecount = 0;
+
+const AMDBaseFrequencies = {
+  'FX|4100': '3.6',
+  'FX|4120': '3.9',
+  'FX|4130': '3.8',
+  'FX|4150': '3.8',
+  'FX|4170': '4.2',
+  'FX|6100': '3.3',
+  'FX|6120': '3.6',
+  'FX|6130': '3.6',
+  'FX|6200': '3.8',
+  'FX|8100': '2.8',
+  'FX|8120': '3.1',
+  'FX|8140': '3.2',
+  'FX|8150': '3.6',
+  'FX|8170': '3.9',
+  'FX|4300': '3.8',
+  'FX|4320': '4.0',
+  'FX|4350': '4.2',
+  'FX|6300': '3.5',
+  'FX|6350': '3.9',
+  'FX|8300': '3.3',
+  'FX|8310': '3.4',
+  'FX|8320': '3.5',
+  'FX|8350': '4.0',
+  'FX|8370': '4.0',
+  'FX|9370': '4.4',
+  'FX|9590': '4.7',
+  'FX|8320E': '3.2',
+  'FX|8370E': '3.3',
+  '1950X': '3.4',
+  '1920X': '3.5',
+  '1920': '3.2',
+  '1900X': '3.8',
+  '1800X': '3.6',
+  '1700X': '3.4',
+  'Pro 1700X': '3.5',
+  '1700': '3.0',
+  'Pro 1700': '3.0',
+  '1600X': '3.6',
+  '1600': '3.2',
+  'Pro 1600': '3.2',
+  '1500X': '3.5',
+  'Pro 1500': '3.5',
+  '1400': '3.2',
+  '1300X': '3.5',
+  'Pro 1300': '3.5',
+  '1200': '3.1',
+  'Pro 1200': '3.1',
+  '7601': '2.2',
+  '7551': '2.0',
+  '7501': '2.0',
+  '74501': '2.3',
+  '7401': '2.0',
+  '7351': '2.4',
+  '7301': '2.2',
+  '7281': '2.1',
+  '7251': '2.1',
+  '7551P': '2.0',
+  '7401P': '2.0',
+  '7351P': '2.4'
+};
+
+function cpuBrandManufacturer(res) {
+  res.brand = res.brand.replace(/\(R\)+/g, '®');
+  res.brand = res.brand.replace(/\(TM\)+/g, '™');
+  res.brand = res.brand.replace(/\(C\)+/g, '©');
+  res.brand = res.brand.replace(/CPU+/g, '').trim();
+  res.manufacturer = res.brand.split(' ')[0];
+
+  let parts = res.brand.split(' ');
+  parts.shift();
+  res.brand = parts.join(' ');
+  return res;
+}
+
+function getAMDSpeed(brand) {
+  let result = '0.00';
+  for (let key in AMDBaseFrequencies) {
+    if (AMDBaseFrequencies.hasOwnProperty(key)) {
+      let parts = key.split('|');
+      //console.log(item);
+      let found = 0;
+      parts.forEach(item => {
+        if (brand.indexOf(item) > -1) {
+          found++;
+        }
+      });
+      if (found === parts.length) {
+        result = AMDBaseFrequencies[key];
+      }
+    }
+  }
+  return result;
+}
+
+// --------------------------
+// CPU - brand, speed
+
+function getCpu() {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      const UNKNOWN = 'unknown';
+      let result = {
+        manufacturer: UNKNOWN,
+        brand: UNKNOWN,
+        vendor: '',
+        family: '',
+        model: '',
+        stepping: '',
+        revision: '',
+        voltage: '',
+        speed: '0.00',
+        speedmin: '',
+        speedmax: '',
+        cores: util.cores(),
+        cache: {}
+      };
+      if (_darwin) {
+        exec('sysctl machdep.cpu hw.cpufrequency_max hw.cpufrequency_min', function (error, stdout) {
+          if (!error) {
+            let lines = stdout.toString().split('\n');
+            const modelline = util.getValue(lines, 'machdep.cpu.brand_string');
+            result.brand = modelline.split('@')[0].trim();
+            result.speed = modelline.split('@')[1].trim();
+            result.speed = parseFloat(result.speed.replace(/GHz+/g, '')).toFixed(2);
+            _cpu_speed = result.speed;
+            result = cpuBrandManufacturer(result);
+            result.speedmin = (util.getValue(lines, 'hw.cpufrequency_min') / 1000000000.0 ).toFixed(2);
+            result.speedmax = (util.getValue(lines, 'hw.cpufrequency_max') / 1000000000.0 ).toFixed(2);
+            result.vendor = util.getValue(lines, 'machdep.cpu.vendor');
+            result.family = util.getValue(lines, 'machdep.cpu.family');
+            result.model = util.getValue(lines, 'machdep.cpu.model');
+            result.stepping = util.getValue(lines, 'machdep.cpu.stepping');
+
+          }
+          cpuCache().then(res => {
+            result.cache = res;
+            resolve(result);
+          });
+        });
+      }
+      if (_linux) {
+        let modelline = '';
+        let lines = [];
+        if (os.cpus()[0] && os.cpus()[0].model) modelline = os.cpus()[0].model;
+        exec('export LC_ALL=C; lscpu; unset LC_ALL', function (error, stdout) {
+          if (!error) {
+            lines = stdout.toString().split('\n');
+          }
+          modelline = util.getValue(lines, 'model name') || modelline;
+          result.brand = modelline.split('@')[0].trim();
+          result.speed = modelline.split('@')[1] ? parseFloat(modelline.split('@')[1].trim()).toFixed(2) : '0.00';
+          if (result.speed === '0.00' && result.brand.indexOf('AMD') > -1) {
+            result.speed = getAMDSpeed(result.brand);
+          }
+          if (result.speed === '0.00') {
+            let current = getCpuCurrentSpeedSync();
+            if (current !== '0.00') result.speed = current.avg.toFixed(2);
+          }
+          _cpu_speed = result.speed;
+          result.speedmin = Math.round(parseFloat(util.getValue(lines, 'cpu min mhz').replace(/,/g, '.')) / 10.0) / 100;
+          result.speedmin = result.speedmin ? parseFloat(result.speedmin).toFixed(2) : '';
+          result.speedmax = Math.round(parseFloat(util.getValue(lines, 'cpu max mhz').replace(/,/g, '.')) / 10.0) / 100;
+          result.speedmax = result.speedmax ? parseFloat(result.speedmax).toFixed(2) : '';
+
+          result = cpuBrandManufacturer(result);
+          result.vendor = util.getValue(lines, 'vendor id');
+          // if (!result.vendor) { result.vendor = util.getValue(lines, 'anbieterkennung'); }
+          result.family = util.getValue(lines, 'cpu family');
+          // if (!result.family) { result.family = util.getValue(lines, 'prozessorfamilie'); }
+          result.model = util.getValue(lines, 'model:');
+          // if (!result.model) { result.model = util.getValue(lines, 'modell:'); }
+          result.stepping = util.getValue(lines, 'stepping');
+          result.revision = util.getValue(lines, 'cpu revision');
+          result.cache.l1d = util.getValue(lines, 'l1d cache');
+          if (result.cache.l1d) { result.cache.l1d = parseInt(result.cache.l1d) * (result.cache.l1d.indexOf('K') !== -1 ? 1024 : 1); }
+          result.cache.l1i = util.getValue(lines, 'l1i cache');
+          if (result.cache.l1i) { result.cache.l1i = parseInt(result.cache.l1i) * (result.cache.l1i.indexOf('K') !== -1 ? 1024 : 1); }
+          result.cache.l2 = util.getValue(lines, 'l2 cache');
+          if (result.cache.l2) { result.cache.l2 = parseInt(result.cache.l2) * (result.cache.l2.indexOf('K') !== -1 ? 1024 : 1); }
+          result.cache.l3 = util.getValue(lines, 'l3 cache');
+          if (result.cache.l3) { result.cache.l3 = parseInt(result.cache.l3) * (result.cache.l3.indexOf('K') !== -1 ? 1024 : 1); }
+          resolve(result);
+        });
+      }
+      if (_freebsd || _openbsd) {
+        let modelline = '';
+        let lines = [];
+        if (os.cpus()[0] && os.cpus()[0].model) modelline = os.cpus()[0].model;
+        exec('export LC_ALL=C; dmidecode -t 4; dmidecode -t 7 ; unset LC_ALL', function (error, stdout) {
+          let cache = [];
+          if (!error) {
+            const data = stdout.toString().split('# dmidecode');
+            const processor = data.length > 0 ? data[1] : '';
+            cache = data.length > 1 ? data[2].split('Cache Information') : [];
+
+            lines = processor.split('\n');
+          }
+          result.brand = modelline.split('@')[0].trim();
+          result.speed = modelline.split('@')[1] ? parseFloat(modelline.split('@')[1].trim()).toFixed(2) : '0.00';
+          if (result.speed === '0.00' && result.brand.indexOf('AMD') > -1) {
+            result.speed = getAMDSpeed(result.brand);
+          }
+          if (result.speed === '0.00') {
+            let current = getCpuCurrentSpeedSync();
+            if (current !== '0.00') result.speed = current.avg.toFixed(2);
+          }
+          _cpu_speed = result.speed;
+          result.speedmin = '';
+          result.speedmax = Math.round(parseFloat(util.getValue(lines, 'max speed').replace(/Mhz/g, '')) / 10.0) / 100;
+          result.speedmax = result.speedmax ? parseFloat(result.speedmax).toFixed(2) : '';
+
+          result = cpuBrandManufacturer(result);
+          result.vendor = util.getValue(lines, 'manufacturer');
+          let sig = util.getValue(lines, 'signature');
+          sig = sig.split(',');
+          for (var i = 0; i < sig.length; i++) {
+            sig[i] = sig[i].trim();
+          }
+          result.family = util.getValue(sig, 'Family', ' ', true);
+          result.model = util.getValue(sig, 'Model', ' ', true);
+          result.stepping = util.getValue(sig, 'Stepping', ' ', true);
+          result.revision = '';
+          const voltage = parseFloat(util.getValue(lines, 'voltage'));
+          result.voltage = isNaN(voltage) ? '' : voltage.toFixed(2);
+          for (let i = 0; i < cache.length; i++) {
+            lines = cache[i].split('\n');
+            let cacheType = util.getValue(lines,'Socket Designation').toLowerCase().replace(' ', '-').split('-');
+            cacheType = cacheType.length ? cacheType[0] : '';
+            const sizeParts = util.getValue(lines,'Installed Size').split(' ');
+            let size = parseInt(sizeParts[0], 10);
+            const unit = sizeParts.length > 1 ? sizeParts[1] : 'kb';
+            size = size * (unit === 'kb' ? 1024 : (unit === 'mb' ? 1024 * 1024 : (unit === 'gb' ? 1024 * 1024 * 1024 : 1)));
+            if (cacheType) {
+              if (cacheType === 'l1') {
+                result.cache[cacheType + 'd'] = size / 2;
+                result.cache[cacheType + 'i'] = size / 2;
+              } else {
+                result.cache[cacheType] = size;
+              }
+            }
+          }
+          resolve(result);
+        });
+      }
+      if (_sunos) {
+        resolve(result);
+      }
+      if (_windows) {
+        try {
+          exec(util.getWmic() + ' cpu get name, description, revision, l2cachesize, l3cachesize, manufacturer, currentclockspeed, maxclockspeed /value', opts, function (error, stdout) {
+            if (!error) {
+              let lines = stdout.split('\r\n');
+              let name = util.getValue(lines, 'name', '=') || '';
+              if (name.indexOf('@') >= 0) {
+                result.brand = name.split('@')[0].trim();
+                result.speed = name.split('@')[1].trim();
+                result.speed = parseFloat(result.speed.replace(/GHz+/g, '').trim()).toFixed(2);
+                _cpu_speed = result.speed;
+              } else {
+                result.brand = name.trim();
+                result.speed = 0;
+              }
+              result = cpuBrandManufacturer(result);
+              result.revision = util.getValue(lines, 'revision', '=');
+              result.cache.l1d = 0;
+              result.cache.l1i = 0;
+              result.cache.l2 = util.getValue(lines, 'l2cachesize', '=');
+              result.cache.l3 = util.getValue(lines, 'l3cachesize', '=');
+              if (result.cache.l2) { result.cache.l2 = parseInt(result.cache.l2, 10) * 1024; }
+              if (result.cache.l3) { result.cache.l3 = parseInt(result.cache.l3, 10) * 1024; }
+              result.vendor = util.getValue(lines, 'manufacturer', '=');
+              result.speedmax = Math.round(parseFloat(util.getValue(lines, 'maxclockspeed', '=').replace(/,/g, '.')) / 10.0) / 100;
+              result.speedmax = result.speedmax ? parseFloat(result.speedmax).toFixed(2) : '';
+              if (!result.speed && result.brand.indexOf('AMD') > -1) {
+                result.speed = getAMDSpeed(result.brand);
+              }
+              if (!result.speed) {
+                result.speed = result.speedmax;
+              }
+  
+              let description = util.getValue(lines, 'description', '=').split(' ');
+              for (let i = 0; i < description.length; i++) {
+                if (description[i].toLowerCase().startsWith('family') && (i+1) < description.length && description[i+1]) {
+                  result.family = description[i+1];
+                }
+                if (description[i].toLowerCase().startsWith('model') && (i+1) < description.length && description[i+1]) {
+                  result.model = description[i+1];
+                }
+                if (description[i].toLowerCase().startsWith('stepping') && (i+1) < description.length && description[i+1]) {
+                  result.stepping = description[i+1];
+                }
+              }
+            }
+            exec(util.getWmic() + ' path Win32_CacheMemory get CacheType,InstalledSize,Purpose', function (error, stdout) {
+              if (!error) {
+                let lines = stdout.split('\r\n').filter(line => line.trim() !== '').filter((line, idx) => idx > 0);
+                lines.forEach(function (line) {
+                  if (line !== '') {
+                    line = line.trim().split(/\s\s+/);
+                    // L1 Instructions
+                    if (line[2] === 'L1 Cache' && line[0] === '3') {
+                      result.cache.l1i = parseInt(line[1], 10);
+                    }
+                    // L1 Data
+                    if (line[2] === 'L1 Cache' && line[0] === '4') {
+                      result.cache.l1d = parseInt(line[1], 10);
+                    }
+                  }
+                });
+              }
+              resolve(result);
+            });
+          });
+        } catch (e) {
+          resolve(result);    
+        }
+      }
+    });
+  });
+}
+
+// --------------------------
+// CPU - Processor Data
+
+function cpu(callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      getCpu().then(result => {
+        if (callback) { callback(result); }
+        resolve(result);
+      });
+    });
+  });
+}
+
+exports.cpu = cpu;
+
+// --------------------------
+// CPU - current speed - in GHz
+
+function getCpuCurrentSpeedSync() {
+
+  let cpus = os.cpus();
+  let minFreq = 999999999;
+  let maxFreq = 0;
+  let avgFreq = 0;
+
+  if (cpus.length) {
+    for (let i in cpus) {
+      if (cpus.hasOwnProperty(i)) {
+        avgFreq = avgFreq + cpus[i].speed;
+        if (cpus[i].speed > maxFreq) maxFreq = cpus[i].speed;
+        if (cpus[i].speed < minFreq) minFreq = cpus[i].speed;
+      }
+    }
+    avgFreq = avgFreq / cpus.length;
+    return {
+      min: parseFloat(((minFreq + 1) / 1000).toFixed(2)),
+      max: parseFloat(((maxFreq + 1)  / 1000).toFixed(2)),
+      avg: parseFloat(((avgFreq + 1)  / 1000).toFixed(2))
+    };
+  } else {
+    return {
+      min: 0,
+      max: 0,
+      avg: 0
+    };
+  }
+}
+
+function cpuCurrentspeed(callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      let result = getCpuCurrentSpeedSync();
+      if (result === 0 && _cpu_speed !== '0.00') result = parseFloat(_cpu_speed);
+
+      if (callback) { callback(result); }
+      resolve(result);
+    });
+  });
+}
+
+exports.cpuCurrentspeed = cpuCurrentspeed;
+
+// --------------------------
+// CPU - temperature
+// if sensors are installed
+
+function cpuTemperature(callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      let result = {
+        main: -1.0,
+        cores: [],
+        max: -1.0
+      };
+      if (_linux) {
+        exec('sensors', function (error, stdout) {
+          if (!error) {
+            let lines = stdout.toString().split('\n');
+            lines.forEach(function (line) {
+              let regex = /\+([^°]*)/g;
+              let temps = line.match(regex);
+              if (line.split(':')[0].toUpperCase().indexOf('PHYSICAL') !== -1) {
+                result.main = parseFloat(temps);
+              }
+              if (line.split(':')[0].toUpperCase().indexOf('CORE ') !== -1) {
+                result.cores.push(parseFloat(temps));
+              }
+            });
+            if (result.cores.length > 0) {
+              let maxtmp = Math.max.apply(Math, result.cores);
+              result.max = (maxtmp > result.main) ? maxtmp : result.main;
+            }
+            if (callback) { callback(result); }
+            resolve(result);
+          } else {
+            fs.stat('/sys/class/thermal/thermal_zone0/temp', function(err) {
+              if(err === null) {
+                exec('cat /sys/class/thermal/thermal_zone0/temp', function (error, stdout) {
+                  if (!error) {
+                    let lines = stdout.toString().split('\n');
+                    if (lines.length > 0) {
+                      result.main = parseFloat(lines[0]) / 1000.0;
+                      result.max = result.main;
+                    }
+                  }
+                  if (callback) { callback(result); }
+                  resolve(result);
+                });
+              } else {
+                exec('/opt/vc/bin/vcgencmd measure_temp', function (error, stdout) {
+                  if (!error) {
+                    let lines = stdout.toString().split('\n');
+                    if (lines.length > 0 && lines[0].indexOf('=')) {
+                      result.main = parseFloat(lines[0].split('=')[1]);
+                      result.max = result.main;
+                    }
+                  }
+                  if (callback) { callback(result); }
+                  resolve(result);
+                });
+              }
+            });
+
+          }
+        });
+      }
+      if (_freebsd || _openbsd) {
+        exec('sysctl dev.cpu | grep temp', function (error, stdout) {
+          if (!error) {
+            let lines = stdout.toString().split('\n');
+            let sum = 0;
+            lines.forEach(function (line) {
+              const parts = line.split(':');
+              if (parts.length > 0) {
+                const temp = parseFloat(parts[1].replace(',', '.'), 10);
+                if (temp > result.max) result.max = temp;
+                sum = sum + temp;
+                result.cores.push(temp);
+              }
+            });
+            if (result.cores.length) {
+              result.main = Math.round(sum / result.cores.length * 100) / 100;
+            }
+          }
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      }
+      if (_darwin) {
+        let osxTemp = null;
+        try {
+          osxTemp = __webpack_require__(!(function webpackMissingModule() { var e = new Error("Cannot find module 'osx-temperature-sensor'"); e.code = 'MODULE_NOT_FOUND'; throw e; }()));
+        } catch (er) {
+          osxTemp = null;
+        }
+        if (osxTemp) {
+          result = osxTemp.cpuTemperature();
+        }
+
+        if (callback) { callback(result); }
+        resolve(result);
+      }
+      if (_sunos) {
+        if (callback) { callback(result); }
+        resolve(result);
+      }
+      if (_windows) {
+        try {
+          exec(util.getWmic() + ' /namespace:\\\\root\\wmi PATH MSAcpi_ThermalZoneTemperature get CurrentTemperature', opts, function (error, stdout) {
+            if (!error) {
+              let sum = 0;
+              let lines = stdout.split('\r\n').filter(line => line.trim() !== '').filter((line, idx) => idx > 0);
+              lines.forEach(function (line) {
+                let value = (parseInt(line) - 2732) / 10;
+                sum = sum + value;
+                if (value > result.max) result.max = value;
+                result.cores.push(value);
+              });
+              if (result.cores.length) {
+                result.main = sum / result.cores.length;
+              }
+            }
+            if (callback) { callback(result); }
+            resolve(result);
+          });
+        } catch (e) {
+          if (callback) { callback(result); }
+          resolve(result);    
+        }
+      }
+    });
+  });
+}
+
+exports.cpuTemperature = cpuTemperature;
+
+// --------------------------
+// CPU Flags
+
+function cpuFlags(callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      let result = '';
+      if (_windows) {
+        try {
+          exec('reg query "HKEY_LOCAL_MACHINE\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0" /v FeatureSet', opts, function (error, stdout) {
+            if (!error) {
+              let flag_hex = stdout.split('0x').pop().trim();
+              let flag_bin_unpadded = parseInt(flag_hex, 16).toString(2);
+              let flag_bin = '0'.repeat(32 - flag_bin_unpadded.length) + flag_bin_unpadded;
+              // empty flags are the reserved fields in the CPUID feature bit list
+              // as found on wikipedia:
+              // https://en.wikipedia.org/wiki/CPUID
+              let all_flags = [
+                'fpu', 'vme', 'de', 'pse', 'tsc', 'msr', 'pae', 'mce', 'cx8', 'apic',
+                '', 'sep', 'mtrr', 'pge', 'mca', 'cmov', 'pat', 'pse-36', 'psn', 'clfsh',
+                '', 'ds', 'acpi', 'mmx', 'fxsr', 'sse', 'sse2', 'ss', 'htt', 'tm', 'ia64', 'pbe'
+              ];
+              for (let f = 0; f < all_flags.length; f++) {
+                if (flag_bin[f] === '1' && all_flags[f] !== '') {
+                  result += ' ' + all_flags[f];
+                }
+              }
+              result = result.trim();
+            }
+            if (callback) { callback(result); }
+            resolve(result);
+          });
+        } catch (e) {
+          if (callback) { callback(result); }
+          resolve(result);    
+        }
+      }
+      if (_linux) {
+        exec('lscpu', function (error, stdout) {
+          if (!error) {
+            let lines = stdout.toString().split('\n');
+            lines.forEach(function (line) {
+              if (line.split(':')[0].toUpperCase().indexOf('FLAGS') !== -1) {
+                result = line.split(':')[1].trim().toLowerCase();
+              }
+            });
+          }
+          if (!result) {
+            exec('cat /proc/cpuinfo', function (error, stdout) {
+              if (!error) {
+                let lines = stdout.toString().split('\n');
+                result = util.getValue(lines, 'features', ':', true).toLowerCase();
+              }
+              if (callback) { callback(result); }
+              resolve(result);  
+            });
+          } else {
+            if (callback) { callback(result); }
+            resolve(result);  
+          }
+        });
+      }
+      if (_freebsd || _openbsd) {
+        exec('export LC_ALL=C; dmidecode -t 4; unset LC_ALL', function (error, stdout) {
+          let flags = [];
+          if (!error) {
+            let parts = stdout.toString().split('\tFlags:');
+            const lines = parts.length > 1 ? parts[1].split('\tVersion:')[0].split['\n'] : [];
+            lines.forEach(function (line) {
+              let flag = (line.indexOf('(') ? line .split('(')[0].toLowerCase() : '').trim().replace(/\t/g, '');
+              if (flag) {
+                flags.push(flag);
+              }
+            });
+          }
+          result = flags.join(' ').trim();
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      }
+      if (_darwin) {
+        exec('sysctl machdep.cpu.features', function (error, stdout) {
+          if (!error) {
+            let lines = stdout.toString().split('\n');
+            if (lines.length > 0 && lines[0].indexOf('machdep.cpu.features:') !== -1) {
+              result = lines[0].split(':')[1].trim().toLowerCase();
+            }
+          }
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      }
+      if (_sunos) {
+        if (callback) { callback(result); }
+        resolve(result);
+      }
+    });
+  });
+}
+
+exports.cpuFlags = cpuFlags;
+
+// --------------------------
+// CPU Flags
+
+function cpuCache(callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+
+      let result = {
+        l1d: -1,
+        l1i: -1,
+        l2: -1,
+        l3: -1,
+      };
+      if (_linux) {
+        exec('lscpu', function (error, stdout) {
+          if (!error) {
+            let lines = stdout.toString().split('\n');
+            lines.forEach(function (line) {
+              let parts = line.split(':');
+              if (parts[0].toUpperCase().indexOf('L1D CACHE') !== -1) {
+                result.l1d = parseInt(parts[1].trim()) * (parts[1].indexOf('K') !== -1 ? 1024 : 1);
+              }
+              if (parts[0].toUpperCase().indexOf('L1I CACHE') !== -1) {
+                result.l1i = parseInt(parts[1].trim()) * (parts[1].indexOf('K') !== -1 ? 1024 : 1);
+              }
+              if (parts[0].toUpperCase().indexOf('L2 CACHE') !== -1) {
+                result.l2 = parseInt(parts[1].trim()) * (parts[1].indexOf('K') !== -1 ? 1024 : 1);
+              }
+              if (parts[0].toUpperCase().indexOf('L3 CACHE') !== -1) {
+                result.l3 = parseInt(parts[1].trim()) * (parts[1].indexOf('K') !== -1 ? 1024 : 1);
+              }
+            });
+          }
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      }
+      if (_freebsd || _openbsd) {
+        exec('export LC_ALL=C; dmidecode -t 7 ; unset LC_ALL', function (error, stdout) {
+          let cache = [];
+          if (!error) {
+            const data = stdout.toString();
+            cache = data.split('Cache Information');
+            cache.shift();
+          }
+          for (let i = 0; i < cache.length; i++) {
+            const lines = cache[i].split('\n');
+            let cacheType = util.getValue(lines,'Socket Designation').toLowerCase().replace(' ', '-').split('-');
+            cacheType = cacheType.length ? cacheType[0] : '';
+            const sizeParts = util.getValue(lines,'Installed Size').split(' ');
+            let size = parseInt(sizeParts[0], 10);
+            const unit = sizeParts.length > 1 ? sizeParts[1] : 'kb';
+            size = size * (unit === 'kb' ? 1024 : (unit === 'mb' ? 1024 * 1024 : (unit === 'gb' ? 1024 * 1024 * 1024 : 1)));
+            if (cacheType) {
+              if (cacheType === 'l1') {
+                result.cache[cacheType + 'd'] = size / 2;
+                result.cache[cacheType + 'i'] = size / 2;
+              } else {
+                result.cache[cacheType] = size;
+              }
+            }
+          }
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      }
+      if (_darwin) {
+        exec('sysctl hw.l1icachesize hw.l1dcachesize hw.l2cachesize hw.l3cachesize', function (error, stdout) {
+          if (!error) {
+            let lines = stdout.toString().split('\n');
+            lines.forEach(function (line) {
+              let parts = line.split(':');
+              if (parts[0].toLowerCase().indexOf('hw.l1icachesize') !== -1) {
+                result.l1d = parseInt(parts[1].trim()) * (parts[1].indexOf('K') !== -1 ? 1024 : 1);
+              }
+              if (parts[0].toLowerCase().indexOf('hw.l1dcachesize') !== -1) {
+                result.l1i = parseInt(parts[1].trim()) * (parts[1].indexOf('K') !== -1 ? 1024 : 1);
+              }
+              if (parts[0].toLowerCase().indexOf('hw.l2cachesize') !== -1) {
+                result.l2 = parseInt(parts[1].trim()) * (parts[1].indexOf('K') !== -1 ? 1024 : 1);
+              }
+              if (parts[0].toLowerCase().indexOf('hw.l3cachesize') !== -1) {
+                result.l3 = parseInt(parts[1].trim()) * (parts[1].indexOf('K') !== -1 ? 1024 : 1);
+              }
+            });
+          }
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      }
+      if (_sunos) {
+        if (callback) { callback(result); }
+        resolve(result);
+      }
+      if (_windows) {
+        try {
+          exec(util.getWmic() + ' cpu get l2cachesize, l3cachesize /value', opts, function (error, stdout) {
+            if (!error) {
+              let lines = stdout.split('\r\n');
+              result.l1d = 0;
+              result.l1i = 0;
+              result.l2 = util.getValue(lines, 'l2cachesize', '=');
+              result.l3 = util.getValue(lines, 'l3cachesize', '=');
+              if (result.l2) { result.l2 = parseInt(result.l2) * 1024; }
+              if (result.l3) { result.l3 = parseInt(result.l3) * 1024; }
+            }
+            exec(util.getWmic() + ' path Win32_CacheMemory get CacheType,InstalledSize,Purpose', function (error, stdout) {
+              if (!error) {
+                let lines = stdout.split('\r\n').filter(line => line.trim() !== '').filter((line, idx) => idx > 0);
+                lines.forEach(function (line) {
+                  if (line !== '') {
+                    line = line.trim().split(/\s\s+/);
+                    // L1 Instructions
+                    if (line[2] === 'L1 Cache' && line[0] === '3') {
+                      result.l1i = parseInt(line[1], 10);
+                    }
+                    // L1 Data
+                    if (line[2] === 'L1 Cache' && line[0] === '4') {
+                      result.l1d = parseInt(line[1], 10);
+                    }
+                  }
+                });
+              }
+              if (callback) { callback(result); }
+              resolve(result);
+            });
+          });
+        } catch (e) {
+          if (callback) { callback(result); }
+          resolve(result);    
+        }
+      }
+    });
+  });
+}
+
+exports.cpuCache = cpuCache;
+
+// --------------------------
+// CPU - current load - in %
+
+function getLoad() {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      let loads = os.loadavg().map(function (x) { return x / util.cores(); });
+      let avgload = parseFloat((Math.max.apply(Math, loads)).toFixed(2));
+      let result = {};
+
+      let now = Date.now() - _current_cpu.ms;
+      if (now >= 200) {
+        _current_cpu.ms = Date.now();
+        const cpus = os.cpus();
+        let totalUser = 0;
+        let totalSystem = 0;
+        let totalNice = 0;
+        let totalIrq = 0;
+        let totalIdle = 0;
+        let cores = [];
+        _corecount = cpus.length;
+
+        for (let i = 0; i < _corecount; i++) {
+          const cpu = cpus[i].times;
+          totalUser += cpu.user;
+          totalSystem += cpu.sys;
+          totalNice += cpu.nice;
+          totalIdle += cpu.idle;
+          totalIrq += cpu.irq;
+          let tmp_tick = (_cpus && _cpus[i] && _cpus[i].totalTick ? _cpus[i].totalTick : 0);
+          let tmp_load = (_cpus && _cpus[i] && _cpus[i].totalLoad ? _cpus[i].totalLoad : 0);
+          let tmp_user = (_cpus && _cpus[i] && _cpus[i].user ? _cpus[i].user : 0);
+          let tmp_system = (_cpus && _cpus[i] && _cpus[i].sys ? _cpus[i].sys : 0);
+          let tmp_nice = (_cpus && _cpus[i] && _cpus[i].nice ? _cpus[i].nice : 0);
+          let tmp_idle = (_cpus && _cpus[i] && _cpus[i].idle ? _cpus[i].idle : 0);
+          let tmp_irq = (_cpus && _cpus[i] && _cpus[i].irq ? _cpus[i].irq : 0);
+          _cpus[i] = cpu;
+          _cpus[i].totalTick = _cpus[i].user + _cpus[i].sys + _cpus[i].nice + _cpus[i].irq + _cpus[i].idle;
+          _cpus[i].totalLoad = _cpus[i].user + _cpus[i].sys + _cpus[i].nice + _cpus[i].irq;
+          _cpus[i].currentTick = _cpus[i].totalTick - tmp_tick;
+          _cpus[i].load = (_cpus[i].totalLoad - tmp_load);
+          _cpus[i].load_user = (_cpus[i].user - tmp_user);
+          _cpus[i].load_system = (_cpus[i].sys - tmp_system);
+          _cpus[i].load_nice = (_cpus[i].nice - tmp_nice);
+          _cpus[i].load_idle = (_cpus[i].idle - tmp_idle);
+          _cpus[i].load_irq = (_cpus[i].irq - tmp_irq);
+          cores[i] = {};
+          cores[i].load = _cpus[i].load / _cpus[i].currentTick * 100;
+          cores[i].load_user = _cpus[i].load_user / _cpus[i].currentTick * 100;
+          cores[i].load_system = _cpus[i].load_system / _cpus[i].currentTick * 100;
+          cores[i].load_nice = _cpus[i].load_nice / _cpus[i].currentTick * 100;
+          cores[i].load_idle = _cpus[i].load_idle / _cpus[i].currentTick * 100;
+          cores[i].load_irq = _cpus[i].load_irq / _cpus[i].currentTick * 100;
+          cores[i].raw_load = _cpus[i].load;
+          cores[i].raw_load_user = _cpus[i].load_user;
+          cores[i].raw_load_system = _cpus[i].load_system;
+          cores[i].raw_load_nice = _cpus[i].load_nice;
+          cores[i].raw_load_idle = _cpus[i].load_idle;
+          cores[i].raw_load_irq = _cpus[i].load_irq;
+        }
+        let totalTick = totalUser + totalSystem + totalNice + totalIrq + totalIdle;
+        let totalLoad = totalUser + totalSystem + totalNice + totalIrq;
+        let currentTick = totalTick - _current_cpu.tick;
+        result = {
+          avgload: avgload,
+          currentload: (totalLoad - _current_cpu.load) / currentTick * 100,
+          currentload_user: (totalUser - _current_cpu.user) / currentTick * 100,
+          currentload_system: (totalSystem - _current_cpu.system) / currentTick * 100,
+          currentload_nice: (totalNice - _current_cpu.nice) / currentTick * 100,
+          currentload_idle: (totalIdle - _current_cpu.idle) / currentTick * 100,
+          currentload_irq: (totalIrq - _current_cpu.irq) / currentTick * 100,
+          raw_currentload: (totalLoad - _current_cpu.load),
+          raw_currentload_user: (totalUser - _current_cpu.user),
+          raw_currentload_system: (totalSystem - _current_cpu.system),
+          raw_currentload_nice: (totalNice - _current_cpu.nice),
+          raw_currentload_idle: (totalIdle - _current_cpu.idle),
+          raw_currentload_irq: (totalIrq - _current_cpu.irq),
+          cpus: cores
+        };
+        _current_cpu = {
+          user: totalUser,
+          nice: totalNice,
+          system: totalSystem,
+          idle: totalIdle,
+          irq: totalIrq,
+          tick: totalTick,
+          load: totalLoad,
+          ms: _current_cpu.ms,
+          currentload: result.currentload,
+          currentload_user: result.currentload_user,
+          currentload_system: result.currentload_system,
+          currentload_nice: result.currentload_nice,
+          currentload_idle: result.currentload_idle,
+          currentload_irq: result.currentload_irq,
+          raw_currentload: result.raw_currentload,
+          raw_currentload_user: result.raw_currentload_user,
+          raw_currentload_system: result.raw_currentload_system,
+          raw_currentload_nice: result.raw_currentload_nice,
+          raw_currentload_idle: result.raw_currentload_idle,
+          raw_currentload_irq: result.raw_currentload_irq,
+        };
+      } else {
+        let cores = [];
+        for (let i = 0; i < _corecount; i++) {
+          cores[i] = {};
+          cores[i].load = _cpus[i].load / _cpus[i].currentTick * 100;
+          cores[i].load_user = _cpus[i].load_user / _cpus[i].currentTick * 100;
+          cores[i].load_system = _cpus[i].load_system / _cpus[i].currentTick * 100;
+          cores[i].load_nice = _cpus[i].load_nice / _cpus[i].currentTick * 100;
+          cores[i].load_idle = _cpus[i].load_idle / _cpus[i].currentTick * 100;
+          cores[i].load_irq = _cpus[i].load_irq / _cpus[i].currentTick * 100;
+          cores[i].raw_load = _cpus[i].load;
+          cores[i].raw_load_user = _cpus[i].load_user;
+          cores[i].raw_load_system = _cpus[i].load_system;
+          cores[i].raw_load_nice = _cpus[i].load_nice;
+          cores[i].raw_load_idle = _cpus[i].load_idle;
+          cores[i].raw_load_irq = _cpus[i].load_irq;
+        }
+        result = {
+          avgload: avgload,
+          currentload: _current_cpu.currentload,
+          currentload_user: _current_cpu.currentload_user,
+          currentload_system: _current_cpu.currentload_system,
+          currentload_nice: _current_cpu.currentload_nice,
+          currentload_idle: _current_cpu.currentload_idle,
+          currentload_irq: _current_cpu.currentload_irq,
+          raw_currentload: _current_cpu.raw_currentload,
+          raw_currentload_user: _current_cpu.raw_currentload_user,
+          raw_currentload_system: _current_cpu.raw_currentload_system,
+          raw_currentload_nice: _current_cpu.raw_currentload_nice,
+          raw_currentload_idle: _current_cpu.raw_currentload_idle,
+          raw_currentload_irq: _current_cpu.raw_currentload_irq,
+          cpus: cores
+        };
+      }
+      resolve(result);
+    });
+  });
+}
+
+function currentLoad(callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      getLoad().then(result => {
+        if (callback) { callback(result); }
+        resolve(result);
+      });
+    });
+  });
+}
+
+exports.currentLoad = currentLoad;
+
+// --------------------------
+// PS - full load
+// since bootup
+
+function getFullLoad() {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+
+      const cpus = os.cpus();
+      let totalUser = 0;
+      let totalSystem = 0;
+      let totalNice = 0;
+      let totalIrq = 0;
+      let totalIdle = 0;
+
+      for (let i = 0, len = cpus.length; i < len; i++) {
+        const cpu = cpus[i].times;
+        totalUser += cpu.user;
+        totalSystem += cpu.sys;
+        totalNice += cpu.nice;
+        totalIrq += cpu.irq;
+        totalIdle += cpu.idle;
+      }
+      let totalTicks = totalIdle + totalIrq + totalNice + totalSystem + totalUser;
+      let result = (totalTicks - totalIdle) / totalTicks * 100.0;
+
+      resolve(result);
+    });
+  });
+}
+
+function fullLoad(callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      getFullLoad().then(result => {
+        if (callback) { callback(result); }
+        resolve(result);
+      });
+    });
+  });
+}
+
+exports.fullLoad = fullLoad;
+
+
+/***/ }),
+
+/***/ "./node_modules/systeminformation/lib/docker.js":
+/*!******************************************************!*\
+  !*** ./node_modules/systeminformation/lib/docker.js ***!
+  \******************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+// ==================================================================================
+// docker.js
+// ----------------------------------------------------------------------------------
+// Description:   System Information - library
+//                for Node.js
+// Copyright:     (c) 2014 - 2018
+// Author:        Sebastian Hildebrandt
+// ----------------------------------------------------------------------------------
+// License:       MIT
+// ==================================================================================
+// 13. Docker
+// ----------------------------------------------------------------------------------
+
+const util = __webpack_require__(/*! ./util */ "./node_modules/systeminformation/lib/util.js");
+const DockerSocket = __webpack_require__(/*! ./dockerSocket */ "./node_modules/systeminformation/lib/dockerSocket.js");
+
+let _docker_container_stats = {};
+let _docker_socket;
+
+
+// --------------------------
+// get containers (parameter all: get also inactive/exited containers)
+
+function dockerContainers(all, callback) {
+
+  function inContainers(containers, id) {
+    let filtered = containers.filter(obj => {
+      /**
+       * @namespace
+       * @property {string}  Id
+       */
+      return (obj.Id && (obj.Id === id));
+    });
+    return (filtered.length > 0);
+  }
+
+  // fallback - if only callback is given
+  if (util.isFunction(all) && !callback) {
+    callback = all;
+    all = false;
+  }
+
+  all = all || false;
+  let result = [];
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      if (!_docker_socket) {
+        _docker_socket = new DockerSocket();
+      }
+
+      _docker_socket.listContainers(all, data => {
+        let docker_containers = {};
+        try {
+          docker_containers = data;
+          if (docker_containers && Object.prototype.toString.call(docker_containers) === '[object Array]' && docker_containers.length > 0) {
+            docker_containers.forEach(function (element) {
+              /**
+               * @namespace
+               * @property {string}  Id
+               * @property {string}  Name
+               * @property {string}  Image
+               * @property {string}  ImageID
+               * @property {string}  Command
+               * @property {number}  Created
+               * @property {string}  State
+               * @property {Array}  Names
+               * @property {Array}  Ports
+               * @property {Array}  Mounts
+               */
+
+              if (element.Names && Object.prototype.toString.call(element.Names) === '[object Array]' && element.Names.length > 0) {
+                element.Name = element.Names[0].replace(/^\/|\/$/g, '');
+              }
+              result.push({
+                id: element.Id,
+                name: element.Name,
+                image: element.Image,
+                imageID: element.ImageID,
+                command: element.Command,
+                created: element.Created,
+                state: element.State,
+                ports: element.Ports,
+                mounts: element.Mounts,
+                // hostconfig: element.HostConfig,
+                // network: element.NetworkSettings
+              });
+            });
+          }
+        } catch (err) {
+          util.noop();
+        }
+        // }
+
+        // GC in _docker_container_stats
+        for (let key in _docker_container_stats) {
+          if (_docker_container_stats.hasOwnProperty(key)) {
+            if (!inContainers(docker_containers, key)) delete _docker_container_stats[key];
+          }
+        }
+        if (callback) { callback(result); }
+        resolve(result);
+      });
+    });
+  });
+}
+
+exports.dockerContainers = dockerContainers;
+
+// --------------------------
+// helper functions for calculation of docker stats
+
+function docker_calcCPUPercent(cpu_stats, id) {
+  /**
+   * @namespace
+   * @property {object}  cpu_usage
+   * @property {number}  cpu_usage.total_usage
+   * @property {number}  system_cpu_usage
+   * @property {object}  cpu_usage
+   * @property {Array}  cpu_usage.percpu_usage
+   */
+
+  let cpuPercent = 0.0;
+  // calculate the change for the cpu usage of the container in between readings
+  let cpuDelta = cpu_stats.cpu_usage.total_usage - (_docker_container_stats[id] && _docker_container_stats[id].prev_CPU ? _docker_container_stats[id].prev_CPU : 0);
+  // calculate the change for the entire system between readings
+  let systemDelta = cpu_stats.system_cpu_usage - (_docker_container_stats[id] && _docker_container_stats[id].prev_system ? _docker_container_stats[id].prev_system : 0);
+
+  if (systemDelta > 0.0 && cpuDelta > 0.0) {
+    cpuPercent = (cpuDelta / systemDelta) * cpu_stats.cpu_usage.percpu_usage.length * 100.0;
+  }
+  if (!_docker_container_stats[id]) _docker_container_stats[id] = {};
+  _docker_container_stats[id].prev_CPU = cpu_stats.cpu_usage.total_usage;
+  _docker_container_stats[id].prev_system = cpu_stats.system_cpu_usage;
+
+  return cpuPercent;
+}
+
+function docker_calcNetworkIO(networks) {
+  let rx;
+  let tx;
+  for (let key in networks) {
+    // skip loop if the property is from prototype
+    if (!networks.hasOwnProperty(key)) continue;
+
+    /**
+     * @namespace
+     * @property {number}  rx_bytes
+     * @property {number}  tx_bytes
+     */
+    let obj = networks[key];
+    rx = +obj.rx_bytes;
+    tx = +obj.tx_bytes;
+  }
+  return {
+    rx: rx,
+    tx: tx
+  };
+}
+
+function docker_calcBlockIO(blkio_stats) {
+  let result = {
+    r: 0,
+    w: 0
+  };
+
+  /**
+   * @namespace
+   * @property {Array}  io_service_bytes_recursive
+   */
+  if (blkio_stats && blkio_stats.io_service_bytes_recursive && Object.prototype.toString.call(blkio_stats.io_service_bytes_recursive) === '[object Array]' && blkio_stats.io_service_bytes_recursive.length > 0) {
+    blkio_stats.io_service_bytes_recursive.forEach(function (element) {
+      /**
+       * @namespace
+       * @property {string}  op
+       * @property {number}  value
+       */
+
+      if (element.op && element.op.toLowerCase() === 'read' && element.value) {
+        result.r += element.value;
+      }
+      if (element.op && element.op.toLowerCase() === 'write' && element.value) {
+        result.w += element.value;
+      }
+    });
+  }
+  return result;
+}
+
+// --------------------------
+// container stats (for one container)
+
+function dockerContainerStats(containerID, callback) {
+  containerID = containerID || '';
+  let result = {
+    id: containerID,
+    mem_usage: 0,
+    mem_limit: 0,
+    mem_percent: 0,
+    cpu_percent: 0,
+    pids: 0,
+    netIO: {
+      rx: 0,
+      wx: 0
+    },
+    blockIO: {
+      r: 0,
+      w: 0
+    }
+  };
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      if (containerID) {
+
+        if (!_docker_socket) {
+          _docker_socket = new DockerSocket();
+        }
+
+        _docker_socket.getStats(containerID, data => {
+          try {
+            let stats = data;
+            /**
+             * @namespace
+             * @property {Object}  memory_stats
+             * @property {number}  memory_stats.usage
+             * @property {number}  memory_stats.limit
+             * @property {Object}  cpu_stats
+             * @property {Object}  pids_stats
+             * @property {number}  pids_stats.current
+             * @property {Object}  networks
+             * @property {Object}  blkio_stats
+             */
+
+            if (!stats.message) {
+              result.mem_usage = (stats.memory_stats && stats.memory_stats.usage ? stats.memory_stats.usage : 0);
+              result.mem_limit = (stats.memory_stats && stats.memory_stats.limit ? stats.memory_stats.limit : 0);
+              result.mem_percent = (stats.memory_stats && stats.memory_stats.usage && stats.memory_stats.limit ? stats.memory_stats.usage / stats.memory_stats.limit * 100.0 : 0);
+              result.cpu_percent = (stats.cpu_stats ? docker_calcCPUPercent(stats.cpu_stats, containerID) : 0);
+              result.pids = (stats.pids_stats && stats.pids_stats.current ? stats.pids_stats.current : 0);
+              if (stats.networks) result.netIO = docker_calcNetworkIO(stats.networks);
+              if (stats.blkio_stats) result.blockIO = docker_calcBlockIO(stats.blkio_stats);
+              result.cpu_stats = (stats.cpu_stats ? stats.cpu_stats : {});
+              result.precpu_stats = (stats.precpu_stats ? stats.precpu_stats : {});
+              result.memory_stats = (stats.memory_stats ? stats.memory_stats : {});
+              result.networks = (stats.networks ? stats.networks : {});
+            }
+          } catch (err) {
+            util.noop();
+          }
+          // }
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      } else {
+        if (callback) { callback(result); }
+        resolve(result);
+      }
+    });
+  });
+}
+
+exports.dockerContainerStats = dockerContainerStats;
+
+// --------------------------
+// container processes (for one container)
+
+function dockerContainerProcesses(containerID, callback) {
+  containerID = containerID || '';
+  let result = [];
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      if (containerID) {
+
+        if (!_docker_socket) {
+          _docker_socket = new DockerSocket();
+        }
+
+        _docker_socket.getProcesses(containerID, data => {
+          /**
+           * @namespace
+           * @property {Array}  Titles
+           * @property {Array}  Processes
+           **/
+          try {
+            if (data && data.Titles && data.Processes) {
+              let titles = data.Titles.map(function(value) {
+                return value.toUpperCase();
+              });
+              let pos_pid = titles.indexOf('PID');
+              let pos_ppid = titles.indexOf('PPID');
+              let pos_pgid = titles.indexOf('PGID');
+              let pos_vsz = titles.indexOf('VSZ');
+              let pos_time = titles.indexOf('TIME');
+              let pos_elapsed = titles.indexOf('ELAPSED');
+              let pos_ni = titles.indexOf('NI');
+              let pos_ruser = titles.indexOf('RUSER');
+              let pos_user = titles.indexOf('USER');
+              let pos_rgroup = titles.indexOf('RGROUP');
+              let pos_group = titles.indexOf('GROUP');
+              let pos_stat = titles.indexOf('STAT');
+              let pos_rss = titles.indexOf('RSS');
+              let pos_command = titles.indexOf('COMMAND');
+
+              data.Processes.forEach(process => {
+                result.push({
+                  pid_host: (pos_pid >= 0 ? process[pos_pid] : ''),
+                  ppid: (pos_ppid >= 0 ? process[pos_ppid] : ''),
+                  pgid: (pos_pgid >= 0 ? process[pos_pgid] : ''),
+                  user: (pos_user >= 0 ? process[pos_user] : ''),
+                  ruser: (pos_ruser >= 0 ? process[pos_ruser] : ''),
+                  group: (pos_group >= 0 ? process[pos_group] : ''),
+                  rgroup: (pos_rgroup >= 0 ? process[pos_rgroup] : ''),
+                  stat: (pos_stat >= 0 ? process[pos_stat] : ''),
+                  time: (pos_time >= 0 ? process[pos_time] : ''),
+                  elapsed: (pos_elapsed >= 0 ? process[pos_elapsed] : ''),
+                  nice: (pos_ni >= 0 ? process[pos_ni] : ''),
+                  rss: (pos_rss >= 0 ? process[pos_rss] : ''),
+                  vsz: (pos_vsz >= 0 ? process[pos_vsz] : ''),
+                  command: (pos_command >= 0 ? process[pos_command] : '')
+                });
+              });
+            }
+          } catch (err) {
+            util.noop();
+          }
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      } else {
+        if (callback) { callback(result); }
+        resolve(result);
+      }
+    });
+  });
+}
+
+exports.dockerContainerProcesses = dockerContainerProcesses;
+
+function dockerAll(callback) {
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      dockerContainers(true).then(result => {
+        if (result && Object.prototype.toString.call(result) === '[object Array]' && result.length > 0) {
+          let l = result.length;
+          result.forEach(function (element) {
+            dockerContainerStats(element.id).then(res => {
+              // include stats in array
+              element.mem_usage = res.mem_usage;
+              element.mem_limit = res.mem_limit;
+              element.mem_percent = res.mem_percent;
+              element.cpu_percent = res.cpu_percent;
+              element.pids = res.pids;
+              element.netIO = res.netIO;
+              element.blockIO = res.blockIO;
+              element.cpu_stats = res.cpu_stats;
+              element.precpu_stats = res.precpu_stats;
+              element.memory_stats = res.memory_stats;
+              element.networks = res.networks;
+
+              dockerContainerProcesses(element.id).then(processes => {
+                element.processes = processes;
+
+                l -= 1;
+                if (l === 0) {
+                  if (callback) { callback(result); }
+                  resolve(result);
+                }
+              });
+              // all done??
+            });
+          });
+        } else {
+          if (callback) { callback(result); }
+          resolve(result);
+        }
+      });
+    });
+  });
+}
+
+exports.dockerAll = dockerAll;
+
+
+/***/ }),
+
+/***/ "./node_modules/systeminformation/lib/dockerSocket.js":
+/*!************************************************************!*\
+  !*** ./node_modules/systeminformation/lib/dockerSocket.js ***!
+  \************************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+// ==================================================================================
+// dockerSockets.js
+// ----------------------------------------------------------------------------------
+// Description:   System Information - library
+//                for Node.js
+// Copyright:     (c) 2014 - 2018
+// Author:        Sebastian Hildebrandt
+// ----------------------------------------------------------------------------------
+// License:       MIT
+// ==================================================================================
+// 13. DockerSockets
+// ----------------------------------------------------------------------------------
+
+const net = __webpack_require__(/*! net */ "net");
+const isWin = __webpack_require__(/*! os */ "os").type() === 'Windows_NT';
+const socketPath = isWin ? '//./pipe/docker_engine' : '/var/run/docker.sock';
+
+class DockerSocket {
+
+  listContainers(all, callback) {
+    try {
+
+      let socket = net.createConnection({path: socketPath});
+      let alldata = '';
+
+      socket.on('connect', () => {
+        socket.write('GET http:/containers/json' + (all ? '?all=1' : '') + ' HTTP/1.0\r\n\r\n');
+      });
+
+      socket.on('data', data => {
+        alldata = alldata + data.toString();
+      });
+
+      socket.on('error', () => {
+        socket = false;
+        callback({});
+      });
+
+      socket.on('end', () => {
+        let startbody = alldata.indexOf('\r\n\r\n');
+        alldata = alldata.substring(startbody, 100000).replace(/[\n\r]/g, '');
+        socket = false;
+        callback(JSON.parse(alldata));
+      });
+    } catch (err) {
+      callback({});
+    }
+  }
+
+  getStats(id, callback) {
+    id = id || '';
+    if (id) {
+      try {
+        let socket = net.createConnection({path: socketPath});
+        let alldata = '';
+
+        socket.on('connect', () => {
+          socket.write('GET http:/containers/' + id + '/stats?stream=0 HTTP/1.0\r\n\r\n');
+        });
+
+        socket.on('data', data => {
+          alldata = alldata + data.toString();
+        });
+
+        socket.on('error', () => {
+          socket = false;
+          callback({});
+        });
+
+        socket.on('end', () => {
+          let startbody = alldata.indexOf('\r\n\r\n');
+          alldata = alldata.substring(startbody, 100000).replace(/[\n\r]/g, '');
+          socket = false;
+          callback(JSON.parse(alldata));
+        });
+      } catch (err) {
+        callback({});
+      }
+    } else {
+      callback({});
+    }
+  }
+
+  getProcesses(id, callback) {
+    id = id || '';
+    if (id) {
+      try {
+        let socket = net.createConnection({path: socketPath});
+        let alldata = '';
+
+        socket.on('connect', () => {
+          socket.write('GET http:/containers/' + id + '/top?ps_args=-opid,ppid,pgid,vsz,time,etime,nice,ruser,user,rgroup,group,stat,rss,args HTTP/1.0\r\n\r\n');
+        });
+
+        socket.on('data', data => {
+          alldata = alldata + data.toString();
+        });
+
+        socket.on('error', () => {
+          socket = false;
+          callback({});
+        });
+
+        socket.on('end', () => {
+          let startbody = alldata.indexOf('\r\n\r\n');
+          alldata = alldata.substring(startbody, 100000).replace(/[\n\r]/g, '');
+          socket = false;
+          callback(JSON.parse(alldata));
+        });
+      } catch (err) {
+        callback({});
+      }
+    } else {
+      callback({});
+    }
+  }
+}
+
+module.exports = DockerSocket;
+
+
+/***/ }),
+
+/***/ "./node_modules/systeminformation/lib/filesystem.js":
+/*!**********************************************************!*\
+  !*** ./node_modules/systeminformation/lib/filesystem.js ***!
+  \**********************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+// ==================================================================================
+// filesystem.js
+// ----------------------------------------------------------------------------------
+// Description:   System Information - library
+//                for Node.js
+// Copyright:     (c) 2014 - 2018
+// Author:        Sebastian Hildebrandt
+// ----------------------------------------------------------------------------------
+// License:       MIT
+// ==================================================================================
+// 8. File System
+// ----------------------------------------------------------------------------------
+
+const exec = __webpack_require__(/*! child_process */ "child_process").exec;
+const execSync = __webpack_require__(/*! child_process */ "child_process").execSync;
+const util = __webpack_require__(/*! ./util */ "./node_modules/systeminformation/lib/util.js");
+
+let _platform = process.platform;
+
+const _linux = (_platform === 'linux');
+const _darwin = (_platform === 'darwin');
+const _windows = (_platform === 'win32');
+const _freebsd = (_platform === 'freebsd');
+const _openbsd = (_platform === 'openbsd');
+const _sunos = (_platform === 'sunos');
+
+const NOT_SUPPORTED = 'not supported';
+
+const opts = {
+  windowsHide: true
+};
+
+let _fs_speed = {};
+let _disk_io = {};
+
+// --------------------------
+// FS - mounted file systems
+
+function fsSize(callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      let data = [];
+      if (_linux || _freebsd || _openbsd || _darwin) {
+        let cmd = '';
+        if (_darwin) cmd = 'df -lkP | grep ^/';
+        if (_linux) cmd = 'df -lkPT | grep ^/';
+        if (_freebsd || _openbsd) cmd = 'df -lkPT';
+        exec(cmd, function (error, stdout) {
+          if (!error) {
+            let lines = stdout.toString().split('\n');
+            //lines.splice(0, 1);
+            lines.forEach(function (line) {
+              if (line !== '') {
+                line = line.replace(/ +/g, ' ').split(' ');
+                if (line && (line[0].startsWith('/')) || (line[6] && line[6] === '/')) {
+                  data.push({
+                    'fs': line[0],
+                    'type': ((_linux || _freebsd || _openbsd) ? line[1] : 'HFS'),
+                    'size': parseInt(((_linux || _freebsd || _openbsd) ? line[2] : line[1])) * 1024,
+                    'used': parseInt(((_linux || _freebsd || _openbsd) ? line[3] : line[2])) * 1024,
+                    'use': parseFloat((100.0 * ((_linux || _freebsd || _openbsd) ? line[3] : line[2]) / ((_linux || _freebsd || _openbsd) ? line[2] : line[1])).toFixed(2)),
+                    'mount': line[line.length - 1]
+                  });
+                }
+              }
+            });
+          }
+          if (callback) {
+            callback(data);
+          }
+          resolve(data);
+        });
+      }
+      if (_sunos) {
+        if (callback) { callback(data); }
+        resolve(data);
+      }
+      if (_windows) {
+        try {
+          exec(util.getWmic() + ' logicaldisk get Caption,FileSystem,FreeSpace,Size', opts, function (error, stdout) {
+            let lines = stdout.split('\r\n').filter(line => line.trim() !== '').filter((line, idx) => idx > 0);
+            lines.forEach(function (line) {
+              if (line !== '') {
+                line = line.trim().split(/\s\s+/);
+                data.push({
+                  'fs': line[0],
+                  'type': line[1],
+                  'size': line[3],
+                  'used': parseInt(line[3]) - parseInt(line[2]),
+                  'use': parseFloat((100.0 * (parseInt(line[3]) - parseInt(line[2]))) / parseInt(line[3])),
+                  'mount': line[0]
+                });
+              }
+            });
+            if (callback) {
+              callback(data);
+            }
+            resolve(data);
+          });
+        } catch (e) {
+          if (callback) { callback(data); }
+          resolve(data);
+        }
+      }
+    });
+  });
+}
+
+exports.fsSize = fsSize;
+
+// --------------------------
+// disks
+
+function parseBytes(s) {
+  return parseInt(s.substr(s.indexOf(' (') + 2, s.indexOf(' Bytes)') - 10));
+}
+
+function parseDevices(lines) {
+  let devices = [];
+  let i = 0;
+  lines.forEach(line => {
+    if (line.length > 0) {
+      if (line[0] === '*') {
+        i++;
+      } else {
+        let parts = line.split(':');
+        if (parts.length > 1) {
+          if (!devices[i]) devices[i] = {
+            name: '',
+            identifier: '',
+            type: 'disk',
+            fstype: '',
+            mount: '',
+            size: 0,
+            physical: 'HDD',
+            uuid: '',
+            label: '',
+            model: '',
+            serial: '',
+            removable: false,
+            protocol: ''
+          };
+          parts[0] = parts[0].trim().toUpperCase().replace(/ +/g, '');
+          parts[1] = parts[1].trim();
+          if ('DEVICEIDENTIFIER' === parts[0]) devices[i].identifier = parts[1];
+          if ('DEVICENODE' === parts[0]) devices[i].name = parts[1];
+          if ('VOLUMENAME' === parts[0]) {
+            if (parts[1].indexOf('Not applicable') === -1) devices[i].label = parts[1];
+          }
+          if ('PROTOCOL' === parts[0]) devices[i].protocol = parts[1];
+          if ('DISKSIZE' === parts[0]) devices[i].size = parseBytes(parts[1]);
+          if ('FILESYSTEMPERSONALITY' === parts[0]) devices[i].fstype = parts[1];
+          if ('MOUNTPOINT' === parts[0]) devices[i].mount = parts[1];
+          if ('VOLUMEUUID' === parts[0]) devices[i].uuid = parts[1];
+          if ('READ-ONLYMEDIA' === parts[0] && parts[1] === 'Yes') devices[i].physical = 'CD/DVD';
+          if ('SOLIDSTATE' === parts[0] && parts[1] === 'Yes') devices[i].physical = 'SSD';
+          if ('VIRTUAL' === parts[0]) devices[i].type = 'virtual';
+          if ('REMOVABLEMEDIA' === parts[0]) devices[i].removable = (parts[1] === 'Removable');
+          if ('PARTITIONTYPE' === parts[0]) devices[i].type = 'part';
+          if ('DEVICE/MEDIANAME' === parts[0]) devices[i].model = parts[1];
+        }
+      }
+    }
+  });
+  return devices;
+}
+
+function parseBlk(lines) {
+  let data = [];
+
+  lines.filter(line => line !== '').forEach((line) => {
+    line = util.decodeEscapeSequence(line);
+    line = line.replace(/\\/g, '\\\\');
+    let disk = JSON.parse(line);
+    data.push({
+      'name': disk.name,
+      'type': disk.type,
+      'fstype': disk.fstype,
+      'mount': disk.mountpoint,
+      'size': parseInt(disk.size),
+      'physical': (disk.type === 'disk' ? (disk.rota === '0' ? 'SSD' : 'HDD') : (disk.type === 'rom' ? 'CD/DVD' : '')),
+      'uuid': disk.uuid,
+      'label': disk.label,
+      'model': disk.model,
+      'serial': disk.serial,
+      'removable': disk.rm === '1',
+      'protocol': disk.tran
+    });
+  });
+
+  data = util.unique(data);
+  data = util.sortByKey(data, ['type', 'name']);
+  return data;
+}
+
+function blkStdoutToObject(stdout) {
+  return stdout.toString()
+    .replace(/NAME=/g, '{"name":')
+    .replace(/FSTYPE=/g, ',"fstype":')
+    .replace(/TYPE=/g, ',"type":')
+    .replace(/SIZE=/g, ',"size":')
+    .replace(/MOUNTPOINT=/g, ',"mountpoint":')
+    .replace(/UUID=/g, ',"uuid":')
+    .replace(/ROTA=/g, ',"rota":')
+    .replace(/RO=/g, ',"ro":')
+    .replace(/RM=/g, ',"rm":')
+    .replace(/TRAN=/g, ',"tran":')
+    .replace(/SERIAL=/g, ',"serial":')
+    .replace(/LABEL=/g, ',"label":')
+    .replace(/MODEL=/g, ',"model":')
+    .replace(/OWNER=/g, ',"owner":')
+    .replace(/\n/g, '}\n');
+}
+
+function blockDevices(callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      let data = [];
+      if (_linux) {
+        // see https://wiki.ubuntuusers.de/lsblk/
+        // exec("lsblk -bo NAME,TYPE,SIZE,FSTYPE,MOUNTPOINT,UUID,ROTA,RO,TRAN,SERIAL,LABEL,MODEL,OWNER,GROUP,MODE,ALIGNMENT,MIN-IO,OPT-IO,PHY-SEC,LOG-SEC,SCHED,RQ-SIZE,RA,WSAME", function (error, stdout) {
+        exec('lsblk -bPo NAME,TYPE,SIZE,FSTYPE,MOUNTPOINT,UUID,ROTA,RO,RM,TRAN,SERIAL,LABEL,MODEL,OWNER', function (error, stdout) {
+          if (!error) {
+            let lines = blkStdoutToObject(stdout).split('\n');
+            data = parseBlk(lines);
+            if (callback) {
+              callback(data);
+            }
+            resolve(data);
+          } else {
+            exec('lsblk -bPo NAME,TYPE,SIZE,FSTYPE,MOUNTPOINT,UUID,ROTA,RO,RM,LABEL,MODEL,OWNER', function (error, stdout) {
+              if (!error) {
+                let lines = blkStdoutToObject(stdout).split('\n');
+                data = parseBlk(lines);
+              }
+              if (callback) {
+                callback(data);
+              }
+              resolve(data);
+            });
+          }
+        });
+      }
+      if (_darwin) {
+        exec('diskutil info -all', function (error, stdout) {
+          if (!error) {
+            let lines = stdout.toString().split('\n');
+            // parse lines into temp array of devices
+            data = parseDevices(lines);
+          }
+          if (callback) {
+            callback(data);
+          }
+          resolve(data);
+        });
+      }
+      if (_sunos) {
+        if (callback) { callback(data); }
+        resolve(data);
+      }
+      if (_windows) {
+        let drivetypes = ['Unknown', 'NoRoot', 'Removable', 'HDD', 'Network', 'CD/DVD', 'RAM'];
+        try {
+          exec(util.getWmic() + ' logicaldisk get Caption,Description,DeviceID,DriveType,FileSystem,FreeSpace,Name,Size,VolumeName,VolumeSerialNumber /value', opts, function (error, stdout) {
+            if (!error) {
+              let devices = stdout.toString().split(/\n\s*\n/);
+              devices.forEach(function (device) {
+                let lines = device.split('\r\n');
+                let drivetype = util.getValue(lines, 'drivetype', '=');
+                if (drivetype) {
+                  data.push({
+                    name: util.getValue(lines, 'name', '='),
+                    identifier: util.getValue(lines, 'caption', '='),
+                    type: 'disk',
+                    fstype: util.getValue(lines, 'filesystem', '=').toLowerCase(),
+                    mount: util.getValue(lines, 'caption', '='),
+                    size: util.getValue(lines, 'size', '='),
+                    physical: (drivetype >= 0 && drivetype <= 6) ? drivetypes[drivetype] : drivetypes[0],
+                    uuid: util.getValue(lines, 'volumeserialnumber', '='),
+                    label: util.getValue(lines, 'volumename', '='),
+                    model: '',
+                    serial: util.getValue(lines, 'volumeserialnumber', '='),
+                    removable: drivetype === '2',
+                    protocol: ''
+                  });
+                }
+              });
+            }
+            if (callback) {
+              callback(data);
+            }
+            resolve(data);
+          });
+
+        } catch (e) {
+          if (callback) { callback(data); }
+          resolve(data);
+        }
+      }
+    });
+  });
+}
+
+exports.blockDevices = blockDevices;
+
+// --------------------------
+// FS - speed
+
+function calcFsSpeed(rx, wx) {
+  let result = {
+    rx: 0,
+    wx: 0,
+    tx: 0,
+    rx_sec: -1,
+    wx_sec: -1,
+    tx_sec: -1,
+    ms: 0
+  };
+
+  if (_fs_speed && _fs_speed.ms) {
+    result.rx = rx;
+    result.wx = wx;
+    result.tx = result.rx + result.wx;
+    result.ms = Date.now() - _fs_speed.ms;
+    result.rx_sec = (result.rx - _fs_speed.bytes_read) / (result.ms / 1000);
+    result.wx_sec = (result.wx - _fs_speed.bytes_write) / (result.ms / 1000);
+    result.tx_sec = result.rx_sec + result.wx_sec;
+    _fs_speed.rx_sec = result.rx_sec;
+    _fs_speed.wx_sec = result.wx_sec;
+    _fs_speed.tx_sec = result.tx_sec;
+    _fs_speed.bytes_read = result.rx;
+    _fs_speed.bytes_write = result.wx;
+    _fs_speed.bytes_overall = result.rx + result.wx;
+    _fs_speed.ms = Date.now();
+    _fs_speed.last_ms = result.ms;
+  } else {
+    result.rx = rx;
+    result.wx = wx;
+    result.tx = result.rx + result.wx;
+    _fs_speed.rx_sec = -1;
+    _fs_speed.wx_sec = -1;
+    _fs_speed.tx_sec = -1;
+    _fs_speed.bytes_read = result.rx;
+    _fs_speed.bytes_write = result.wx;
+    _fs_speed.bytes_overall = result.rx + result.wx;
+    _fs_speed.ms = Date.now();
+    _fs_speed.last_ms = 0;
+  }
+  return result;
+}
+
+function fsStats(callback) {
+
+  return new Promise((resolve, reject) => {
+    process.nextTick(() => {
+      if (_windows) {
+        let error = new Error(NOT_SUPPORTED);
+        if (callback) {
+          callback(NOT_SUPPORTED);
+        }
+        reject(error);
+      }
+
+      let result = {
+        rx: 0,
+        wx: 0,
+        tx: 0,
+        rx_sec: -1,
+        wx_sec: -1,
+        tx_sec: -1,
+        ms: 0
+      };
+
+      let rx = 0;
+      let wx = 0;
+      if ((_fs_speed && !_fs_speed.ms) || (_fs_speed && _fs_speed.ms && Date.now() - _fs_speed.ms >= 500)) {
+        if (_linux) {
+          // exec("df -k | grep /dev/", function(error, stdout) {
+          exec('lsblk | grep /', function (error, stdout) {
+            if (!error) {
+              let lines = stdout.toString().split('\n');
+              let fs_filter = [];
+              lines.forEach(function (line) {
+                if (line !== '') {
+                  line = line.replace(/[├─│└]+/g, '').trim().split(' ');
+                  if (fs_filter.indexOf(line[0]) === -1) fs_filter.push(line[0]);
+                }
+              });
+
+              let output = fs_filter.join('|');
+              exec('cat /proc/diskstats | egrep "' + output + '"', function (error, stdout) {
+                if (!error) {
+                  let lines = stdout.toString().split('\n');
+                  lines.forEach(function (line) {
+                    line = line.trim();
+                    if (line !== '') {
+                      line = line.replace(/ +/g, ' ').split(' ');
+
+                      rx += parseInt(line[5]) * 512;
+                      wx += parseInt(line[9]) * 512;
+                    }
+                  });
+                  result = calcFsSpeed(rx, wx);
+                }
+                if (callback) {
+                  callback(result);
+                }
+                resolve(result);
+              });
+            } else {
+              if (callback) {
+                callback(result);
+              }
+              resolve(result);
+            }
+          });
+        }
+        if (_darwin) {
+          exec('ioreg -c IOBlockStorageDriver -k Statistics -r -w0 | sed -n "/IOBlockStorageDriver/,/Statistics/p" | grep "Statistics" | tr -cd "01234567890,\n"', function (error, stdout) {
+            if (!error) {
+              let lines = stdout.toString().split('\n');
+              lines.forEach(function (line) {
+                line = line.trim();
+                if (line !== '') {
+                  line = line.split(',');
+
+                  rx += parseInt(line[2]);
+                  wx += parseInt(line[9]);
+                }
+              });
+              result = calcFsSpeed(rx, wx);
+            }
+            if (callback) {
+              callback(result);
+            }
+            resolve(result);
+          });
+        }
+      } else {
+        result.ms = _fs_speed.last_ms;
+        result.rx = _fs_speed.bytes_read;
+        result.wx = _fs_speed.bytes_write;
+        result.tx = _fs_speed.bytes_read + _fs_speed.bytes_write;
+        result.rx_sec = _fs_speed.rx_sec;
+        result.wx_sec = _fs_speed.wx_sec;
+        result.tx_sec = _fs_speed.tx_sec;
+        if (callback) {
+          callback(result);
+        }
+        resolve(result);
+      }
+    });
+  });
+}
+
+exports.fsStats = fsStats;
+
+function calcDiskIO(rIO, wIO) {
+  let result = {
+    rIO: 0,
+    wIO: 0,
+    tIO: 0,
+    rIO_sec: -1,
+    wIO_sec: -1,
+    tIO_sec: -1,
+    ms: 0
+  };
+  if (_disk_io && _disk_io.ms) {
+    result.rIO = rIO;
+    result.wIO = wIO;
+    result.tIO = rIO + wIO;
+    result.ms = Date.now() - _disk_io.ms;
+    result.rIO_sec = (result.rIO - _disk_io.rIO) / (result.ms / 1000);
+    result.wIO_sec = (result.wIO - _disk_io.wIO) / (result.ms / 1000);
+    result.tIO_sec = result.rIO_sec + result.wIO_sec;
+    _disk_io.rIO = rIO;
+    _disk_io.wIO = wIO;
+    _disk_io.rIO_sec = result.rIO_sec;
+    _disk_io.wIO_sec = result.wIO_sec;
+    _disk_io.tIO_sec = result.tIO_sec;
+    _disk_io.last_ms = result.ms;
+    _disk_io.ms = Date.now();
+  } else {
+    result.rIO = rIO;
+    result.wIO = wIO;
+    result.tIO = rIO + wIO;
+    _disk_io.rIO = rIO;
+    _disk_io.wIO = wIO;
+    _disk_io.rIO_sec = -1;
+    _disk_io.wIO_sec = -1;
+    _disk_io.tIO_sec = -1;
+    _disk_io.last_ms = 0;
+    _disk_io.ms = Date.now();
+  }
+  return result;
+}
+
+function disksIO(callback) {
+
+  return new Promise((resolve, reject) => {
+    process.nextTick(() => {
+      if (_windows) {
+        let error = new Error(NOT_SUPPORTED);
+        if (callback) {
+          callback(NOT_SUPPORTED);
+        }
+        reject(error);
+      }
+      if (_sunos) {
+        let error = new Error(NOT_SUPPORTED);
+        if (callback) {
+          callback(NOT_SUPPORTED);
+        }
+        reject(error);
+      }
+
+      let result = {
+        rIO: 0,
+        wIO: 0,
+        tIO: 0,
+        rIO_sec: -1,
+        wIO_sec: -1,
+        tIO_sec: -1,
+        ms: 0
+      };
+      let rIO = 0;
+      let wIO = 0;
+
+      if ((_disk_io && !_disk_io.ms) || (_disk_io && _disk_io.ms && Date.now() - _disk_io.ms >= 500)) {
+        if (_linux || _freebsd || _openbsd) {
+          // prints Block layer statistics for all mounted volumes
+          // var cmd = "for mount in `lsblk | grep / | sed -r 's/│ └─//' | cut -d ' ' -f 1`; do cat /sys/block/$mount/stat | sed -r 's/ +/;/g' | sed -r 's/^;//'; done";
+          // var cmd = "for mount in `lsblk | grep / | sed 's/[│└─├]//g' | awk '{$1=$1};1' | cut -d ' ' -f 1 | sort -u`; do cat /sys/block/$mount/stat | sed -r 's/ +/;/g' | sed -r 's/^;//'; done";
+          let cmd = 'for mount in `lsblk | grep " disk " | sed "s/[│└─├]//g" | awk \'{$1=$1};1\' | cut -d " " -f 1 | sort -u`; do cat /sys/block/$mount/stat | sed -r "s/ +/;/g" | sed -r "s/^;//"; done';
+
+          exec(cmd, function (error, stdout) {
+            if (!error) {
+              let lines = stdout.split('\n');
+              lines.forEach(function (line) {
+                // ignore empty lines
+                if (!line) return;
+
+                // sum r/wIO of all disks to compute all disks IO
+                let stats = line.split(';');
+                rIO += parseInt(stats[0]);
+                wIO += parseInt(stats[4]);
+              });
+              result = calcDiskIO(rIO, wIO);
+
+              if (callback) {
+                callback(result);
+              }
+              resolve(result);
+            } else {
+              if (callback) {
+                callback(result);
+              }
+              resolve(result);
+            }
+          });
+        }
+        if (_darwin) {
+          exec('ioreg -c IOBlockStorageDriver -k Statistics -r -w0 | sed -n "/IOBlockStorageDriver/,/Statistics/p" | grep "Statistics" | tr -cd "01234567890,\n"', function (error, stdout) {
+            if (!error) {
+              let lines = stdout.toString().split('\n');
+              lines.forEach(function (line) {
+                line = line.trim();
+                if (line !== '') {
+                  line = line.split(',');
+
+                  rIO += parseInt(line[10]);
+                  wIO += parseInt(line[0]);
+                }
+              });
+              result = calcDiskIO(rIO, wIO);
+            }
+            if (callback) {
+              callback(result);
+            }
+            resolve(result);
+          });
+        }
+      } else {
+        result.rIO = _disk_io.rIO;
+        result.wIO = _disk_io.wIO;
+        result.tIO = _disk_io.rIO + _disk_io.wIO;
+        result.ms = _disk_io.last_ms;
+        result.rIO_sec = _disk_io.rIO_sec;
+        result.wIO_sec = _disk_io.wIO_sec;
+        result.tIO_sec = _disk_io.tIO_sec;
+        if (callback) {
+          callback(result);
+        }
+        resolve(result);
+      }
+    });
+  });
+}
+
+exports.disksIO = disksIO;
+
+function diskLayout(callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+
+      let result = [];
+
+      if (_linux) {
+        exec('export LC_ALL=C; lshw -class disk; unset LC_ALL', function (error, stdout) {
+          if (!error) {
+            let devices = stdout.toString().split('*-');
+            devices.shift();
+            devices.forEach(function (device) {
+              let lines = device.split('\n');
+              let mediumType = '';
+              const logical = util.getValue(lines, 'logical name', ':', true).trim().replace(/\/dev\//g, '');
+              try {
+                mediumType = execSync('cat /sys/block/' + logical + '/queue/rotational').toString().split('\n')[0];
+              } catch (e) {
+                util.noop();
+              }
+
+              const sizeString = util.getValue(lines, 'size', ':', true).trim();
+              if (sizeString && lines.length > 0 && lines[0].trim() === 'disk') {
+                const sizeValue = sizeString.match(/\(([^)]+)\)/)[1];
+                result.push({
+                  type: (mediumType === '0' ? 'SSD' : (mediumType === '1' ? 'HD' : (device.indexOf('SSD') > -1 ? 'SSD' : 'HD'))), // to be tested ... /sys/block/sda/queue/rotational
+                  name: util.getValue(lines, 'product:', ':', true),
+                  vendor: util.getValue(lines, 'vendor:', ':', true),
+                  size: parseInt(sizeValue, 10) * 1000 * 1000 * 1000 * (sizeValue.indexOf('T') >= 0 ? 1000 : 1),
+                  bytesPerSector: -1,
+                  totalCylinders: -1,
+                  totalHeads: -1,
+                  totalSectors: -1,
+                  totalTracks: -1,
+                  tracksPerCylinder: -1,
+                  sectorsPerTrack: -1,
+                  firmwareRevision: util.getValue(lines, 'version:', ':', true).trim(),
+                  serialNum: util.getValue(lines, 'serial:', ':', true).trim(),
+                  interfaceType: '',
+                });
+              }
+            });
+          }
+          if (callback) {
+            callback(result);
+          }
+          resolve(result);
+        });
+      }
+      if (_freebsd || _openbsd) {
+        if (callback) { callback(result); }
+        resolve(result);
+      }
+      if (_sunos) {
+        if (callback) { callback(result); }
+        resolve(result);
+      }
+
+      if (_darwin) {
+        exec('system_profiler SPSerialATADataType SPNVMeDataType', function (error, stdout) {
+          if (!error) {
+            let parts = stdout.toString().split('NVMExpress:');
+
+            let devices = parts[0].split(' Physical Interconnect: ');
+            devices.shift();
+            devices.forEach(function (device) {
+              device = 'InterfaceType: ' + device;
+              let lines = device.split('\n');
+              const mediumType = util.getValue(lines, 'Medium Type', ':', true).trim();
+              const sizeStr = util.getValue(lines, 'capacity', ':', true).trim();
+              if (sizeStr) {
+                let sizeValue = 0;
+                if (sizeStr.indexOf('(') >= 0) {
+                  sizeValue = parseInt(sizeStr.match(/\(([^)]+)\)/)[1].replace(/\./g, '').replace(/,/g, ''));
+                }
+                if (!sizeValue) {
+                  sizeValue = parseInt(sizeStr);
+                }
+                if (sizeValue) {
+                  result.push({
+                    type: mediumType.startsWith('Solid') ? 'SSD' : 'HD',
+                    name: util.getValue(lines, 'Model', ':', true).trim(),
+                    vendor: '',
+                    size: sizeValue,
+                    bytesPerSector: -1,
+                    totalCylinders: -1,
+                    totalHeads: -1,
+                    totalSectors: -1,
+                    totalTracks: -1,
+                    tracksPerCylinder: -1,
+                    sectorsPerTrack: -1,
+                    firmwareRevision: util.getValue(lines, 'Revision', ':', true).trim(),
+                    serialNum: util.getValue(lines, 'Serial Number', ':', true).trim(),
+                    interfaceType: util.getValue(lines, 'InterfaceType', ':', true).trim()
+                  });
+                }
+              }
+            });
+            if (parts.length > 1) {
+              let devices = parts[1].split('\n\n          Capacity:');
+              devices.shift();
+              devices.forEach(function (device) {
+                device = '!Capacity: ' + device;
+                let lines = device.split('\n');
+                const linkWidth = util.getValue(lines, 'link width', ':', true).trim();
+                const sizeStr = util.getValue(lines, '!capacity', ':', true).trim();
+                if (sizeStr) {
+                  let sizeValue = 0;
+                  if (sizeStr.indexOf('(') >= 0) {
+                    sizeValue = parseInt(sizeStr.match(/\(([^)]+)\)/)[1].replace(/\./g, '').replace(/,/g, ''));
+                  }
+                  if (!sizeValue) {
+                    sizeValue = parseInt(sizeStr);
+                  }
+                  if (sizeValue) {
+                    result.push({
+                      type: 'NVMe',
+                      name: util.getValue(lines, 'Model', ':', true).trim(),
+                      vendor: '',
+                      size: sizeValue,
+                      bytesPerSector: -1,
+                      totalCylinders: -1,
+                      totalHeads: -1,
+                      totalSectors: -1,
+                      totalTracks: -1,
+                      tracksPerCylinder: -1,
+                      sectorsPerTrack: -1,
+                      firmwareRevision: util.getValue(lines, 'Revision', ':', true).trim(),
+                      serialNum: util.getValue(lines, 'Serial Number', ':', true).trim(),
+                      interfaceType: ('PCIe ' + linkWidth).trim(),
+                    });
+                  }
+                }
+              });
+            }
+          }
+          if (callback) {
+            callback(result);
+          }
+          resolve(result);
+        });
+      }
+      if (_windows) {
+        try {
+          exec(util.getWmic() + ' diskdrive get /value', { encoding: 'utf8', windowsHide: true }, function (error, stdout) {
+            if (!error) {
+              let devices = stdout.toString().split(/\n\s*\n/);
+              devices.forEach(function (device) {
+                let lines = device.split('\r\n');
+                const size = util.getValue(lines, 'Size', '=').trim();
+                if (size) {
+                  result.push({
+                    type: device.indexOf('SSD') > -1 ? 'SSD' : 'HD',  // not really correct(!) ... maybe this one is better: MSFT_PhysicalDisk - Media Type??
+                    name: util.getValue(lines, 'Caption', '='),
+                    vendor: util.getValue(lines, 'Manufacturer', '='),
+                    size: parseInt(size),
+                    bytesPerSector: parseInt(util.getValue(lines, 'BytesPerSector', '=')),
+                    totalCylinders: parseInt(util.getValue(lines, 'TotalCylinders', '=')),
+                    totalHeads: parseInt(util.getValue(lines, 'TotalHeads', '=')),
+                    totalSectors: parseInt(util.getValue(lines, 'TotalSectors', '=')),
+                    totalTracks: parseInt(util.getValue(lines, 'TotalTracks', '=')),
+                    tracksPerCylinder: parseInt(util.getValue(lines, 'TracksPerCylinder', '=')),
+                    sectorsPerTrack: parseInt(util.getValue(lines, 'SectorsPerTrack', '=')),
+                    firmwareRevision: util.getValue(lines, 'FirmwareRevision', '=').trim(),
+                    serialNum: util.getValue(lines, 'SerialNumber', '=').trim(),
+                    interfaceType: util.getValue(lines, 'InterfaceType', '=').trim()
+                  });
+                }
+              });
+            }
+            if (callback) {
+              callback(result);
+            }
+            resolve(result);
+          });
+        } catch (e) {
+          if (callback) { callback(result); }
+          resolve(result);
+        }
+      }
+    });
+  });
+}
+
+exports.diskLayout = diskLayout;
+
+
+/***/ }),
+
+/***/ "./node_modules/systeminformation/lib/graphics.js":
+/*!********************************************************!*\
+  !*** ./node_modules/systeminformation/lib/graphics.js ***!
+  \********************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+// ==================================================================================
+// graphics.js
+// ----------------------------------------------------------------------------------
+// Description:   System Information - library
+//                for Node.js
+// Copyright:     (c) 2014 - 2018
+// Author:        Sebastian Hildebrandt
+// ----------------------------------------------------------------------------------
+// License:       MIT
+// ==================================================================================
+// 7. Graphics (controller, display)
+// ----------------------------------------------------------------------------------
+
+const exec = __webpack_require__(/*! child_process */ "child_process").exec;
+const util = __webpack_require__(/*! ./util */ "./node_modules/systeminformation/lib/util.js");
+
+let _platform = process.platform;
+
+const _linux = (_platform === 'linux');
+const _darwin = (_platform === 'darwin');
+const _windows = (_platform === 'win32');
+const _freebsd = (_platform === 'freebsd');
+const _openbsd = (_platform === 'openbsd');
+const _sunos = (_platform === 'sunos');
+
+const opts = {
+  windowsHide: true
+};
+
+let _resolutionx = 0;
+let _resolutiony = 0;
+let _pixeldepth = 0;
+
+function toInt(value) {
+  let result = parseInt(value, 10);
+  if (isNaN(result)) {
+    result = 0;
+  }
+  return result;
+}
+
+function graphics(callback) {
+
+  function parseLinesDarwin(lines) {
+    let starts = [];
+    let level = -1;
+    let lastlevel = -1;
+    let controllers = [];
+    let displays = [];
+    let currentController = {};
+    let currentDisplay = {};
+    for (let i = 0; i < lines.length; i++) {
+      if ('' !== lines[i].trim()) {
+        let start = lines[i].search(/\S|$/);
+        if (-1 === starts.indexOf(start)) {
+          starts.push(start);
+        }
+        level = starts.indexOf(start);
+        if (level < lastlevel) {
+          if (Object.keys(currentController).length > 0) {// just changed to Displays
+            controllers.push(currentController);
+            currentController = {};
+          }
+          if (Object.keys(currentDisplay).length > 0) {// just changed to Displays
+            displays.push(currentDisplay);
+            currentDisplay = {};
+          }
+        }
+        lastlevel = level;
+        let parts = lines[i].split(':');
+        if (2 === level) {       // grafics controller level
+          if (parts.length > 1 && parts[0].replace(/ +/g, '').toLowerCase().indexOf('chipsetmodel') !== -1) currentController.model = parts[1].trim();
+          if (parts.length > 1 && parts[0].replace(/ +/g, '').toLowerCase().indexOf('bus') !== -1) currentController.bus = parts[1].trim();
+          if (parts.length > 1 && parts[0].replace(/ +/g, '').toLowerCase().indexOf('vendor') !== -1) currentController.vendor = parts[1].split('(')[0].trim();
+          if (parts.length > 1 && parts[0].replace(/ +/g, '').toLowerCase().indexOf('vram(total)') !== -1) {
+            currentController.vram = parseInt(parts[1]);    // in MB
+            currentController.vramDynamic = false;
+          }
+          if (parts.length > 1 && parts[0].replace(/ +/g, '').toLowerCase().indexOf('vram(dynamic,max)') !== -1) {
+            currentController.vram = parseInt(parts[1]);    // in MB
+            currentController.vramDynamic = true;
+          }
+        }
+        if (3 === level) {       // display controller level
+          if (parts.length > 1 && '' === parts[1]) {
+            currentDisplay.model = parts[0].trim();
+            currentDisplay.main = false;
+            currentDisplay.builtin = false;
+            currentDisplay.connection = '';
+            currentDisplay.sizex = -1;
+            currentDisplay.sizey = -1;
+          }
+        }
+        if (4 === level) {       // display controller details level
+          if (parts.length > 1 && parts[0].replace(/ +/g, '').toLowerCase().indexOf('resolution') !== -1) {
+            let resolution = parts[1].split('x');
+            currentDisplay.resolutionx = (resolution.length > 1 ? parseInt(resolution[0]) : 0);
+            currentDisplay.resolutiony = (resolution.length > 1 ? parseInt(resolution[1]) : 0);
+          }
+          if (parts.length > 1 && parts[0].replace(/ +/g, '').toLowerCase().indexOf('pixeldepth') !== -1) currentDisplay.pixeldepth = parseInt(parts[1]); // in BIT
+          if (parts.length > 1 && parts[0].replace(/ +/g, '').toLowerCase().indexOf('maindisplay') !== -1 && parts[1].replace(/ +/g, '').toLowerCase() === 'yes') currentDisplay.main = true;
+          if (parts.length > 1 && parts[0].replace(/ +/g, '').toLowerCase().indexOf('built-in') !== -1 && parts[1].replace(/ +/g, '').toLowerCase() === 'yes') {
+            currentDisplay.builtin = true;
+            currentDisplay.connection = '';
+          }
+          if (parts.length > 1 && parts[0].replace(/ +/g, '').toLowerCase().indexOf('connectiontype') !== -1) {
+            currentDisplay.builtin = false;
+            currentDisplay.connection = parts[1].trim();
+          }
+        }
+      }
+    }
+    if (Object.keys(currentController).length > 0) {// just changed to Displays
+      controllers.push(currentController);
+    }
+    if (Object.keys(currentDisplay).length > 0) {// just changed to Displays
+      displays.push(currentDisplay);
+    }
+    return ({
+      controllers: controllers,
+      displays: displays
+    });
+  }
+
+  function parseLinesLinuxControllers(lines) {
+    let controllers = [];
+    let currentController = {};
+    let isGraphicsController = false;
+    for (let i = 0; i < lines.length; i++) {
+      if ('' !== lines[i].trim()) {
+        if (' ' !== lines[i][0] && '\t' !== lines[i][0]) {        // first line of new entry
+          let vgapos = lines[i].toLowerCase().indexOf('vga');
+          let _3dcontrollerpos = lines[i].toLowerCase().indexOf('3d controller');
+          if (vgapos !== -1 || _3dcontrollerpos !== -1) {         // VGA
+            if (_3dcontrollerpos !== -1 && vgapos === -1) {
+              vgapos = _3dcontrollerpos;
+            }
+            if (Object.keys(currentController).length > 0) {// already a controller found
+              controllers.push(currentController);
+              currentController = {};
+            }
+            isGraphicsController = true;
+            let endpos = lines[i].search(/\[[0-9a-f]{4}:[0-9a-f]{4}]|$/);
+            let parts = lines[i].substr(vgapos, endpos - vgapos).split(':');
+            if (parts.length > 1) {
+              parts[1] = parts[1].trim();
+              if (parts[1].toLowerCase().indexOf('corporation') >= 0) {
+                currentController.vendor = parts[1].substr(0, parts[1].toLowerCase().indexOf('corporation') + 11).trim();
+                currentController.model = parts[1].substr(parts[1].toLowerCase().indexOf('corporation') + 11, 200).trim().split('(')[0];
+                currentController.bus = '';
+                currentController.vram = -1;
+                currentController.vramDynamic = false;
+              } else if (parts[1].toLowerCase().indexOf(' inc.') >= 0) {
+                if ((parts[1].match(new RegExp(']', 'g')) || []).length > 1) {
+                  currentController.vendor = parts[1].substr(0, parts[1].toLowerCase().indexOf(']') + 1).trim();
+                  currentController.model = parts[1].substr(parts[1].toLowerCase().indexOf(']')+1, 200).trim().split('(')[0];
+                } else {
+                  currentController.vendor = parts[1].substr(0, parts[1].toLowerCase().indexOf(' inc.') + 5).trim();
+                  currentController.model = parts[1].substr(parts[1].toLowerCase().indexOf(' inc.') + 5, 200).trim().split('(')[0];
+                }
+                currentController.bus = '';
+                currentController.vram = -1;
+                currentController.vramDynamic = false;
+              }
+            }
+
+          } else {
+            isGraphicsController = false;
+          }
+        }
+        if (isGraphicsController) { // within VGA details
+          let parts = lines[i].split(':');
+          if (parts.length > 1 && parts[0].replace(/ +/g, '').toLowerCase().indexOf('devicename') !== -1 && parts[0].toLowerCase().indexOf('onboard') !== -1) currentController.bus = 'Onboard';
+          if (parts.length > 1 && parts[0].replace(/ +/g, '').toLowerCase().indexOf('region') !== -1 && parts[1].toLowerCase().indexOf('memory') !== -1) {
+            let memparts = parts[1].split('=');
+            if (memparts.length > 1) {
+              currentController.vram = parseInt(memparts[1]);
+            }
+          }
+        }
+      }
+    }
+    if (Object.keys(currentController).length > 0) {// still controller information available
+      controllers.push(currentController);
+    }
+    return (controllers);
+  }
+
+  function parseLinesLinuxEdid(edid) {
+    // parsen EDID
+    // --> model
+    // --> resolutionx
+    // --> resolutiony
+    // --> builtin = false
+    // --> pixeldepth (?)
+    // --> sizex
+    // --> sizey
+    let result = {};
+    // find first "Detailed Timing Description"
+    let start = 108;
+    if (edid.substr(start, 6) === '000000') {
+      start += 36;
+    }
+    if (edid.substr(start, 6) === '000000') {
+      start += 36;
+    }
+    if (edid.substr(start, 6) === '000000') {
+      start += 36;
+    }
+    if (edid.substr(start, 6) === '000000') {
+      start += 36;
+    }
+    result.resolutionx = parseInt('0x0' + edid.substr(start + 8, 1) + edid.substr(start + 4, 2));
+    result.resolutiony = parseInt('0x0' + edid.substr(start + 14, 1) + edid.substr(start + 10, 2));
+    result.sizex = parseInt('0x0' + edid.substr(start + 28, 1) + edid.substr(start + 24, 2));
+    result.sizey = parseInt('0x0' + edid.substr(start + 29, 1) + edid.substr(start + 26, 2));
+    // monitor name
+    start = edid.indexOf('000000fc00'); // find first "Monitor Description Data"
+    if (start >= 0) {
+      let model_raw = edid.substr(start + 10, 26);
+      if (model_raw.indexOf('0a') !== -1) {
+        model_raw = model_raw.substr(0, model_raw.indexOf('0a'));
+      }
+      result.model = model_raw.match(/.{1,2}/g).map(function (v) {
+        return String.fromCharCode(parseInt(v, 16));
+      }).join('');
+    } else {
+      result.model = '';
+    }
+    return result;
+  }
+
+  function parseLinesLinuxDisplays(lines, depth) {
+    let displays = [];
+    let currentDisplay = {};
+    let is_edid = false;
+    let edid_raw = '';
+    let start = 0;
+    for (let i = 1; i < lines.length; i++) {        // start with second line
+      if ('' !== lines[i].trim()) {
+        if (' ' !== lines[i][0] && '\t' !== lines[i][0] && lines[i].toLowerCase().indexOf(' connected ') !== -1) {        // first line of new entry
+          if (Object.keys(currentDisplay).length > 0) {         // push last display to array
+            displays.push(currentDisplay);
+            currentDisplay = {};
+          }
+          let parts = lines[i].split(' ');
+          currentDisplay.connection = parts[0];
+          currentDisplay.main = (parts[2] === 'primary');
+          currentDisplay.builtin = (parts[0].toLowerCase().indexOf('edp') >= 0);
+        }
+
+        // try to read EDID information
+        if (is_edid) {
+          if (lines[i].search(/\S|$/) > start) {
+            edid_raw += lines[i].toLowerCase().trim();
+          } else {
+            // parsen EDID
+            let edid_decoded = parseLinesLinuxEdid(edid_raw);
+            currentDisplay.model = edid_decoded.model;
+            currentDisplay.resolutionx = edid_decoded.resolutionx;
+            currentDisplay.resolutiony = edid_decoded.resolutiony;
+            currentDisplay.sizex = edid_decoded.sizex;
+            currentDisplay.sizey = edid_decoded.sizey;
+            currentDisplay.pixeldepth = depth;
+            is_edid = false;
+          }
+        }
+        if (lines[i].toLowerCase().indexOf('edid:') !== -1) {
+          is_edid = true;
+          start = lines[i].search(/\S|$/);
+        }
+      }
+    }
+
+    // pushen displays
+    if (Object.keys(currentDisplay).length > 0) {         // still information there
+      displays.push(currentDisplay);
+    }
+    return displays;
+  }
+
+  // function starts here
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      let result = {
+        controllers: [],
+        displays: []
+      };
+      if (_darwin) {
+        let cmd = 'system_profiler SPDisplaysDataType';
+        exec(cmd, function (error, stdout) {
+          if (!error) {
+            let lines = stdout.toString().split('\n');
+            result = parseLinesDarwin(lines);
+          }
+          if (callback) {
+            callback(result);
+          }
+          resolve(result);
+        });
+      }
+      if (_linux) {
+        let cmd = 'lspci -vvv  2>/dev/null';
+        exec(cmd, function (error, stdout) {
+          if (!error) {
+            let lines = stdout.toString().split('\n');
+            result.controllers = parseLinesLinuxControllers(lines);
+          }
+          let cmd = 'xdpyinfo 2>/dev/null | grep \'depth of root window\' | awk \'{ print $5 }\'';
+          exec(cmd, function (error, stdout) {
+            let depth = 0;
+            if (!error) {
+              let lines = stdout.toString().split('\n');
+              depth = parseInt(lines[0]) || 0;
+            }
+            let cmd = 'xrandr --verbose 2>/dev/null';
+            exec(cmd, function (error, stdout) {
+              if (!error) {
+                let lines = stdout.toString().split('\n');
+                result.displays = parseLinesLinuxDisplays(lines, depth);
+              }
+              if (callback) {
+                callback(result);
+              }
+              resolve(result);
+            });
+          });
+        });
+      }
+      if (_freebsd || _openbsd) {
+        if (callback) { callback(result); }
+        resolve(result);
+      }
+      if (_sunos) {
+        if (callback) { callback(result); }
+        resolve(result);
+      }
+      if (_windows) {
+        // https://blogs.technet.microsoft.com/heyscriptingguy/2013/10/03/use-powershell-to-discover-multi-monitor-information/
+        try {
+          exec(util.getWmic() + ' path win32_VideoController get AdapterCompatibility, AdapterDACType, name, PNPDeviceID, CurrentVerticalResolution, CurrentHorizontalResolution, CurrentNumberOfColors, AdapterRAM, CurrentBitsPerPixel, CurrentRefreshRate, MinRefreshRate, MaxRefreshRate, VideoMemoryType /value', opts, function (error, stdout) {
+            if (!error) {
+              let csections = stdout.split(/\n\s*\n/);
+              result.controllers = parseLinesWindowsControllers(csections);
+              exec(util.getWmic() + ' path win32_desktopmonitor get Caption, MonitorManufacturer, MonitorType, ScreenWidth, ScreenHeight /value', opts, function (error, stdout) {
+                let dsections = stdout.split(/\n\s*\n/);
+                if (!error) {
+                  result.displays = parseLinesWindowsDisplays(dsections);
+                  if (result.controllers.length === 1 && result.displays.length === 1) {
+                    if (_resolutionx && !result.displays[0].resolutionx) {
+                      result.displays[0].resolutionx = _resolutionx;
+                    }
+                    if (_resolutiony && !result.displays[0].resolutiony) {
+                      result.displays[0].resolutiony = _resolutiony;
+                    }
+                    if (_pixeldepth) {
+                      result.displays[0].pixeldepth = _pixeldepth;
+                    }
+                  }
+                }
+                if (callback) {
+                  callback(result);
+                }
+                resolve(result);
+              });
+            }
+          });  
+        } catch (e) {
+          if (callback) { callback(result); }
+          resolve(result);
+        }
+      }
+    });
+  });
+
+  function parseLinesWindowsControllers(sections) {
+    let controllers = [];
+    for (let i in sections) {
+      if (sections.hasOwnProperty(i)) {
+        if (sections[i].trim() !== '') {
+
+          let lines = sections[i].trim().split('\r\n');
+          controllers.push({
+            model: util.getValue(lines, 'name', '='),
+            vendor: util.getValue(lines, 'AdapterCompatibility', '='),
+            bus: util.getValue(lines, 'PNPDeviceID', '=').startsWith('PCI') ? 'PCI' : '',
+            vram: parseInt(util.getValue(lines, 'AdapterRAM', '='), 10) / 1024 / 1024,
+            vramDynamic: (util.getValue(lines, 'VideoMemoryType', '=') === '2')
+          });
+          _resolutionx = toInt(util.getValue(lines, 'CurrentHorizontalResolution', '='));
+          _resolutiony = toInt(util.getValue(lines, 'CurrentVerticalResolution', '='));
+          _pixeldepth = toInt(util.getValue(lines, 'CurrentBitsPerPixel', '='));
+        }
+      }
+    }
+    return controllers;
+  }
+
+  function parseLinesWindowsDisplays(sections) {
+    let displays = [];
+    for (let i in sections) {
+      if (sections.hasOwnProperty(i)) {
+        if (sections[i].trim() !== '') {
+          let lines = sections[i].trim().split('\r\n');
+          displays.push({
+            model: util.getValue(lines, 'MonitorManufacturer', '='),
+            main: false,
+            builtin: false,
+            connection: '',
+            resolutionx: toInt(util.getValue(lines, 'ScreenWidth', '=')),
+            resolutiony: toInt(util.getValue(lines, 'ScreenHeight', '=')),
+            sizex: -1,
+            sizey: -1
+          });
+        }
+      }
+    }
+    return displays;
+  }
+}
+
+exports.graphics = graphics;
+
+
+/***/ }),
+
+/***/ "./node_modules/systeminformation/lib/index.js":
+/*!*****************************************************!*\
+  !*** ./node_modules/systeminformation/lib/index.js ***!
+  \*****************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+// ==================================================================================
+// index.js
+// ----------------------------------------------------------------------------------
+// Description:   System Information - library
+//                for Node.js
+// Copyright:     (c) 2014 - 2018
+// Author:        Sebastian Hildebrandt
+// ----------------------------------------------------------------------------------
+// Contributors:  Guillaume Legrain (https://github.com/glegrain)
+//                Riccardo Novaglia (https://github.com/richy24)
+//                Quentin Busuttil (https://github.com/Buzut)
+//                Lapsio (https://github.com/lapsio)
+//                csy (https://github.com/csy1983)
+// ----------------------------------------------------------------------------------
+// License:       MIT
+// ==================================================================================
+//
+// Sections
+// --------------------------------
+// 1. General
+// 2. System (HW)
+// 3. OS - Operating System
+// 4. CPU
+// 5. Memory
+// 6. Battery
+// 7. Graphics
+// 8. File System
+// 9. Network
+// 10. Processes
+// 11. Users/Sessions
+// 12. Internet
+// 13. Docker
+// 14. GetAll - get all data
+//
+// ==================================================================================
+//
+// Installation
+// --------------------------------
+//
+// # npm install systeminformation --save
+//
+// Since version 2.0 systeminformation has no more dependencies.
+//
+// ==================================================================================
+//
+// Usage
+// --------------------------------
+// All functions (except `version` and `time`) are asynchronous functions. Here a small example how to use them:
+//
+// var si = require('systeminformation');
+//
+// // callback style
+// si.cpu(function(data) {
+//	  console.log('CPU-Information:');
+//	  console.log(data);
+// })
+//
+// // promises style
+// si.cpu()
+// 	.then(data => console.log(data))
+// 	.catch(error => console.error(error));
+//
+// ==================================================================================
+//
+// Comments
+// --------------------------------
+//
+// This library is still work in progress. Version 3 comes with further improvements. First it
+// requires now node.js version 4.0 and above. Another big change is, that all functions now
+// return promises. You can use them like before with callbacks OR with promises
+// (see example in this documentation). I am sure, there is for sure room for improvement.
+// I was only able to test it on several Debian, Raspbian, Ubuntu distributions as well as
+// OS X (Mavericks, Yosemite, El Captain) and some Windows machines.
+// Since version 2 nearly all functionality is available for OS X/Darwin platforms.
+// In Version 3 I started to add (limited!) windows support.
+//
+// Comments, suggestions & reports are very welcome!
+//
+// ==================================================================================
+
+// ----------------------------------------------------------------------------------
+// Dependencies
+// ----------------------------------------------------------------------------------
+
+const lib_version = __webpack_require__(/*! ../package.json */ "./node_modules/systeminformation/package.json").version;
+const util = __webpack_require__(/*! ./util */ "./node_modules/systeminformation/lib/util.js");
+const system = __webpack_require__(/*! ./system */ "./node_modules/systeminformation/lib/system.js");
+const osInfo = __webpack_require__(/*! ./osinfo */ "./node_modules/systeminformation/lib/osinfo.js");
+const cpu = __webpack_require__(/*! ./cpu */ "./node_modules/systeminformation/lib/cpu.js");
+const memory = __webpack_require__(/*! ./memory */ "./node_modules/systeminformation/lib/memory.js");
+const battery = __webpack_require__(/*! ./battery */ "./node_modules/systeminformation/lib/battery.js");
+const graphics = __webpack_require__(/*! ./graphics */ "./node_modules/systeminformation/lib/graphics.js");
+const filesystem = __webpack_require__(/*! ./filesystem */ "./node_modules/systeminformation/lib/filesystem.js");
+const network = __webpack_require__(/*! ./network */ "./node_modules/systeminformation/lib/network.js");
+const processes = __webpack_require__(/*! ./processes */ "./node_modules/systeminformation/lib/processes.js");
+const users = __webpack_require__(/*! ./users */ "./node_modules/systeminformation/lib/users.js");
+const internet = __webpack_require__(/*! ./internet */ "./node_modules/systeminformation/lib/internet.js");
+const docker = __webpack_require__(/*! ./docker */ "./node_modules/systeminformation/lib/docker.js");
+
+let _platform = process.platform;
+const _windows = (_platform === 'win32');
+const _freebsd = (_platform === 'freebsd');
+const _openbsd = (_platform === 'openbsd');
+const _sunos = (_platform === 'sunos');
+
+// ----------------------------------------------------------------------------------
+// 1. General
+// ----------------------------------------------------------------------------------
+
+function version() {
+  return lib_version;
+}
+
+// ----------------------------------------------------------------------------------
+// 14. get all
+// ----------------------------------------------------------------------------------
+
+// --------------------------
+// get static data - they should not change until restarted
+
+function getStaticData(callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+
+      let data = {};
+
+      data.version = version();
+
+      Promise.all([
+        system.system(),
+        system.bios(),
+        system.baseboard(),
+        osInfo.osInfo(),
+        osInfo.versions(),
+        cpu.cpu(),
+        cpu.cpuFlags(),
+        graphics.graphics(),
+        network.networkInterfaces(),
+        memory.memLayout(),
+        filesystem.diskLayout()
+      ]).then(res => {
+        data.system = res[0];
+        data.bios = res[1];
+        data.baseboard = res[2];
+        data.os = res[3];
+        data.versions = res[4];
+        data.cpu = res[5];
+        data.cpu.flags = res[6];
+        data.graphics = res[7];
+        data.net = res[8];
+        data.memLayout = res[9];
+        data.diskLayout = res[10];
+        if (callback) { callback(data); }
+        resolve(data);
+      });
+    });
+  });
+}
+
+// --------------------------
+// get all dynamic data - e.g. for monitoring agents
+// may take some seconds to get all data
+// --------------------------
+// 2 additional parameters needed
+// - srv: 		comma separated list of services to monitor e.g. "mysql, apache, postgresql"
+// - iface:	define network interface for which you like to monitor network speed e.g. "eth0"
+
+function getDynamicData(srv, iface, callback) {
+
+  if (util.isFunction(iface)) {
+    callback = iface;
+    iface = '';
+  }
+  if (util.isFunction(srv)) {
+    callback = srv;
+    srv = '';
+  }
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+
+      iface = iface || network.getDefaultNetworkInterface();
+      srv = srv || '';
+
+      // use closure to track ƒ completion
+      let functionProcessed = (function () {
+        let totalFunctions = 14;
+        if (_windows) totalFunctions = 10;
+        if (_freebsd || _openbsd) totalFunctions = 11;
+        if (_sunos) totalFunctions = 6;
+
+        return function () {
+          if (--totalFunctions === 0) {
+            if (callback) {
+              callback(data);
+            }
+            resolve(data);
+          }
+        };
+      })();
+
+      // var totalFunctions = 14;
+      // function functionProcessed() {
+      //   if (--totalFunctions === 0) {
+      //     if (callback) { callback(data) }
+      //     resolve(data);
+      //   }
+      // }
+
+      let data = {};
+
+      // get time
+      data.time = osInfo.time();
+
+      /**
+       * @namespace
+       * @property {Object}  versions
+       * @property {string}  versions.node
+       * @property {string}  versions.v8
+       */
+      data.node = process.versions.node;
+      data.v8 = process.versions.v8;
+
+      cpu.cpuCurrentspeed().then(res => {
+        data.cpuCurrentspeed = res;
+        functionProcessed();
+      });
+
+      users.users().then(res => {
+        data.users = res;
+        functionProcessed();
+      });
+
+      if (!_windows) {
+        processes.processes().then(res => {
+          data.processes = res;
+          functionProcessed();
+        });
+      }
+
+      cpu.currentLoad().then(res => {
+        data.currentLoad = res;
+        functionProcessed();
+      });
+
+      if (!_sunos) {
+        cpu.cpuTemperature().then(res => {
+          data.temp = res;
+          functionProcessed();
+        });
+      }
+
+      if (!_openbsd && !_freebsd && !_sunos) {
+        network.networkStats(iface).then(res => {
+          data.networkStats = res;
+          functionProcessed();
+        });
+      }
+
+      if (!_sunos) {
+        network.networkConnections().then(res => {
+          data.networkConnections = res;
+          functionProcessed();
+        });
+      }
+
+      memory.mem().then(res => {
+        data.mem = res;
+        functionProcessed();
+      });
+
+      if (!_sunos) {
+        battery().then(res => {
+          data.battery = res;
+          functionProcessed();
+        });
+      }
+
+      if (!_windows && !_sunos) {
+        processes.services(srv).then(res => {
+          data.services = res;
+          functionProcessed();
+        });
+      }
+
+      if (!_sunos) {
+        filesystem.fsSize().then(res => {
+          data.fsSize = res;
+          functionProcessed();
+        });
+      }
+
+      if (!_windows && !_openbsd && !_freebsd && !_sunos) {
+        filesystem.fsStats().then(res => {
+          data.fsStats = res;
+          functionProcessed();
+        });
+      }
+
+      if (!_windows && !_openbsd && !_freebsd && !_sunos) {
+        filesystem.disksIO().then(res => {
+          data.disksIO = res;
+          functionProcessed();
+        });
+      }
+
+      internet.inetLatency().then(res => {
+        data.inetLatency = res;
+        functionProcessed();
+      });
+    });
+  });
+}
+
+// --------------------------
+// get all data at once
+// --------------------------
+// 2 additional parameters needed
+// - srv: 		comma separated list of services to monitor e.g. "mysql, apache, postgresql"
+// - iface:	define network interface for which you like to monitor network speed e.g. "eth0"
+
+function getAllData(srv, iface, callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      let data = {};
+
+      if (iface && util.isFunction(iface) && !callback) {
+        callback = iface;
+        iface = '';
+      }
+
+      if (srv && util.isFunction(srv) && !iface && !callback) {
+        callback = srv;
+        srv = '';
+        iface = '';
+      }
+
+      getStaticData().then(res => {
+        data = res;
+        getDynamicData(srv, iface).then(res => {
+          for (let key in res) {
+            if (res.hasOwnProperty(key)) {
+              data[key] = res[key];
+            }
+          }
+          if (callback) { callback(data); }
+          resolve(data);
+        });
+      });
+    });
+  });
+}
+
+// ----------------------------------------------------------------------------------
+// export all libs
+// ----------------------------------------------------------------------------------
+
+exports.version = version;
+exports.system = system.system;
+exports.bios = system.bios;
+exports.baseboard = system.baseboard;
+
+exports.time = osInfo.time;
+exports.osInfo = osInfo.osInfo;
+exports.versions = osInfo.versions;
+exports.shell = osInfo.shell;
+
+exports.cpu = cpu.cpu;
+exports.cpuFlags = cpu.cpuFlags;
+exports.cpuCache = cpu.cpuCache;
+exports.cpuCurrentspeed = cpu.cpuCurrentspeed;
+exports.cpuTemperature = cpu.cpuTemperature;
+exports.currentLoad = cpu.currentLoad;
+exports.fullLoad = cpu.fullLoad;
+
+exports.mem = memory.mem;
+exports.memLayout = memory.memLayout;
+
+exports.battery = battery;
+
+exports.graphics = graphics.graphics;
+
+exports.fsSize = filesystem.fsSize;
+exports.blockDevices = filesystem.blockDevices;
+exports.fsStats = filesystem.fsStats;
+exports.disksIO = filesystem.disksIO;
+exports.diskLayout = filesystem.diskLayout;
+
+exports.networkInterfaceDefault = network.networkInterfaceDefault;
+exports.networkInterfaces = network.networkInterfaces;
+exports.networkStats = network.networkStats;
+exports.networkConnections = network.networkConnections;
+
+exports.services = processes.services;
+exports.processes = processes.processes;
+exports.processLoad = processes.processLoad;
+
+exports.users = users.users;
+
+exports.inetChecksite = internet.inetChecksite;
+exports.inetLatency = internet.inetLatency;
+
+exports.dockerContainers = docker.dockerContainers;
+exports.dockerContainerStats = docker.dockerContainerStats;
+exports.dockerContainerProcesses = docker.dockerContainerProcesses;
+exports.dockerAll = docker.dockerAll;
+
+exports.getStaticData = getStaticData;
+exports.getDynamicData = getDynamicData;
+exports.getAllData = getAllData;
+
+
+/***/ }),
+
+/***/ "./node_modules/systeminformation/lib/internet.js":
+/*!********************************************************!*\
+  !*** ./node_modules/systeminformation/lib/internet.js ***!
+  \********************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+// ==================================================================================
+// internet.js
+// ----------------------------------------------------------------------------------
+// Description:   System Information - library
+//                for Node.js
+// Copyright:     (c) 2014 - 2018
+// Author:        Sebastian Hildebrandt
+// ----------------------------------------------------------------------------------
+// License:       MIT
+// ==================================================================================
+// 12. Internet
+// ----------------------------------------------------------------------------------
+
+const exec = __webpack_require__(/*! child_process */ "child_process").exec;
+const util = __webpack_require__(/*! ./util */ "./node_modules/systeminformation/lib/util.js");
+
+let _platform = process.platform;
+
+const _linux = (_platform === 'linux');
+const _darwin = (_platform === 'darwin');
+const _windows = (_platform === 'win32');
+const _freebsd = (_platform === 'freebsd');
+const _openbsd = (_platform === 'openbsd');
+const _sunos = (_platform === 'sunos');
+
+const opts = {
+  windowsHide: true
+};
+
+// --------------------------
+// check if external site is available
+
+function inetChecksite(url, callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+
+      let result = {
+        url: url,
+        ok: false,
+        status: 404,
+        ms: -1
+      };
+      if (url) {
+        url = url.toLowerCase();
+        let t = Date.now();
+        if (_linux || _freebsd || _openbsd || _darwin || _sunos) {
+          let args = ' -I --connect-timeout 5 -m 5 ' + url + ' 2>/dev/null | head -n 1 | cut -d " " -f2';
+          let cmd = 'curl';
+          exec(cmd + args, function (error, stdout) {
+            let statusCode = parseInt(stdout.toString());
+            result.status = statusCode || 404;
+            result.ok = !error && (statusCode === 200 || statusCode === 301 || statusCode === 302 || statusCode === 304);
+            result.ms = (result.ok ? Date.now() - t : -1);
+            if (callback) { callback(result); }
+            resolve(result);
+          });
+        }
+        if (_windows) {   // if this is stable, this can be used for all OS types
+          const http = (url.startsWith('https:') ? __webpack_require__(/*! https */ "https") : __webpack_require__(/*! http */ "http"));
+          try {
+            http.get(url, (res) => {
+              const statusCode = res.statusCode;
+
+              result.status = statusCode || 404;
+              result.ok = (statusCode === 200 || statusCode === 301 || statusCode === 302 || statusCode === 304);
+
+              if (statusCode !== 200) {
+                res.resume();
+                result.ms = (result.ok ? Date.now() - t : -1);
+                if (callback) { callback(result); }
+                resolve(result);
+              } else {
+                // res.on('data', (chunk) => {  });
+                res.on('end', () => {
+                  result.ms = (result.ok ? Date.now() - t : -1);
+                  if (callback) { callback(result); }
+                  resolve(result);
+                });
+              }
+            }).on('error', () => {
+              if (callback) { callback(result); }
+              resolve(result);
+            });
+          } catch (err) {
+            if (callback) { callback(result); }
+            resolve(result);
+          }
+        }
+      } else {
+        if (callback) { callback(result); }
+        resolve(result);
+      }
+    });
+  });
+}
+
+exports.inetChecksite = inetChecksite;
+
+// --------------------------
+// check inet latency
+
+function inetLatency(host, callback) {
+
+  // fallback - if only callback is given
+  if (util.isFunction(host) && !callback) {
+    callback = host;
+    host = '';
+  }
+
+  host = host || '8.8.8.8';
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      let cmd;
+      if (_linux || _freebsd || _openbsd || _darwin) {
+        if (_linux) {
+          cmd = 'ping -c 2 -w 3 ' + host + ' | grep rtt';
+        }
+        if (_freebsd || _openbsd) {
+          cmd = 'ping -c 2 -t 3 ' + host + ' | grep round-trip';
+        }
+        if (_darwin) {
+          cmd = 'ping -c 2 -t 3 ' + host + ' | grep avg';
+        }
+
+        exec(cmd, function (error, stdout) {
+          let result = -1;
+          if (!error) {
+            const line = stdout.toString().split('=');
+            if (line.length > 1) {
+              const parts = line[1].split('/');
+              if (parts.length > 1) {
+                result = parseFloat(parts[1]);
+              }
+            }
+          }
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      }
+      if (_sunos) {
+        exec('ping -s -a ' + host + ' 56 2 | grep avg', {timeout: 3000}, function (error, stdout) {
+          let result = -1;
+          if (!error) {
+            const line = stdout.toString().split('=');
+            if (line.length > 1) {
+              const parts = line[1].split('/');
+              if (parts.length > 1) {
+                result = parseFloat(parts[1].replace(',', '.'));
+              }
+            }
+          }
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      }
+      if (_windows) {
+        let result = -1;
+        try {
+          exec('ping ' + host + ' -n 1', opts, function (error, stdout) {
+            if (!error) {
+              let lines = stdout.toString().split('\r\n');
+              lines.shift();
+              lines.forEach(function (line) {
+                if (line.toLowerCase().startsWith('    min')) {
+                  let l = line.replace(/ +/g, ' ').split(' ');
+                  if (l.length > 8) {
+                    result = parseFloat(l[9]);
+                  }
+                }
+              });
+            }
+            if (callback) { callback(result); }
+            resolve(result);
+          });  
+        } catch (e) {
+          if (callback) { callback(result); }
+          resolve(result);
+        }
+      }
+    });
+  });
+}
+
+exports.inetLatency = inetLatency;
+
+
+/***/ }),
+
+/***/ "./node_modules/systeminformation/lib/memory.js":
+/*!******************************************************!*\
+  !*** ./node_modules/systeminformation/lib/memory.js ***!
+  \******************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+// ==================================================================================
+// memory.js
+// ----------------------------------------------------------------------------------
+// Description:   System Information - library
+//                for Node.js
+// Copyright:     (c) 2014 - 2018
+// Author:        Sebastian Hildebrandt
+// ----------------------------------------------------------------------------------
+// License:       MIT
+// ==================================================================================
+// 5. Memory
+// ----------------------------------------------------------------------------------
+
+const os = __webpack_require__(/*! os */ "os");
+const exec = __webpack_require__(/*! child_process */ "child_process").exec;
+const util = __webpack_require__(/*! ./util */ "./node_modules/systeminformation/lib/util.js");
+
+let _platform = process.platform;
+
+const _linux = (_platform === 'linux');
+const _darwin = (_platform === 'darwin');
+const _windows = (_platform === 'win32');
+const _freebsd = (_platform === 'freebsd');
+const _openbsd = (_platform === 'openbsd');
+const _sunos = (_platform === 'sunos');
+
+const opts = {
+  windowsHide: true
+};
+
+const OSX_RAM_manufacturers = {
+  '0x014F': 'Transcend Information',
+  '0x2C00': 'Micron Technology Inc.',
+  '0x802C': 'Micron Technology Inc.',
+  '0x80AD': 'Hynix Semiconductor Inc.',
+  '0x80CE': 'Samsung Electronics Inc.',
+  '0xAD00': 'Hynix Semiconductor Inc.',
+  '0xCE00': 'Samsung Electronics Inc.',
+  '0x02FE': 'Elpida',
+  '0x5105': 'Qimonda AG i. In.',
+  '0x8551': 'Qimonda AG i. In.',
+  '0x859B': 'Crucial'
+};
+
+// _______________________________________________________________________________________
+// |                         R A M                              |          H D           |
+// |______________________|_________________________|           |                        |
+// |        active             buffers/cache        |           |                        |
+// |________________________________________________|___________|_________|______________|
+// |                     used                            free   |   used       free      |
+// |____________________________________________________________|________________________|
+// |                        total                               |          swap          |
+// |____________________________________________________________|________________________|
+
+// free (older versions)
+// ----------------------------------
+// # free
+//              total       used        free     shared    buffers     cached
+// Mem:         16038 (1)   15653 (2)   384 (3)  0 (4)     236 (5)     14788 (6)
+// -/+ buffers/cache:       628 (7)     15409 (8)
+// Swap:        16371         83      16288
+//
+// |------------------------------------------------------------|
+// |                           R A M                            |
+// |______________________|_____________________________________|
+// | active (2-(5+6) = 7) |  available (3+5+6 = 8)              |
+// |______________________|_________________________|___________|
+// |        active        |  buffers/cache (5+6)    |           |
+// |________________________________________________|___________|
+// |                   used (2)                     | free (3)  |
+// |____________________________________________________________|
+// |                          total (1)                         |
+// |____________________________________________________________|
+
+//
+// free (since free von procps-ng 3.3.10)
+// ----------------------------------
+// # free
+//              total       used        free     shared    buffers/cache   available
+// Mem:         16038 (1)   628 (2)     386 (3)  0 (4)     15024 (5)     14788 (6)
+// Swap:        16371         83      16288
+//
+// |------------------------------------------------------------|
+// |                           R A M                            |
+// |______________________|_____________________________________|
+// |                      |      available (6) estimated        |
+// |______________________|_________________________|___________|
+// |     active (2)       |   buffers/cache (5)     | free (3)  |
+// |________________________________________________|___________|
+// |                          total (1)                         |
+// |____________________________________________________________|
+//
+// Reference: http://www.software-architect.net/blog/article/date/2015/06/12/-826c6e5052.html
+
+function mem(callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+
+      let result = {
+        total: os.totalmem(),
+        free: os.freemem(),
+        used: os.totalmem() - os.freemem(),
+
+        active: os.totalmem() - os.freemem(),     // temporarily (fallback)
+        available: os.freemem(),                  // temporarily (fallback)
+        buffcache: 0,
+
+        swaptotal: 0,
+        swapused: 0,
+        swapfree: 0
+      };
+
+      if (_linux) {
+        exec('free -b', function (error, stdout) {
+          if (!error) {
+            let lines = stdout.toString().split('\n');
+
+            let mem = lines[1].replace(/ +/g, ' ').split(' ');
+            result.total = parseInt(mem[1], 10);
+            result.free = parseInt(mem[3], 10);
+
+            if (lines.length === 4) {                   // free (since free von procps-ng 3.3.10)
+              result.buffcache = parseInt(mem[5], 10);
+              result.available = parseInt(mem[6], 10);
+              mem = lines[2].replace(/ +/g, ' ').split(' ');
+            } else {                                    // free (older versions)
+              result.buffcache = parseInt(mem[5], 10) + parseInt(mem[6], 10);
+              result.available = result.free + result.buffcache;
+              mem = lines[3].replace(/ +/g, ' ').split(' ');
+            }
+            result.active = result.total - result.free - result.buffcache;
+
+            result.swaptotal = parseInt(mem[1], 10);
+            result.swapfree = parseInt(mem[3], 10);
+            result.swapused = parseInt(mem[2], 10);
+
+          }
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      }
+      if (_freebsd || _openbsd) {
+        exec('/sbin/sysctl -a | grep -E "hw.realmem|hw.physmem|vm.stats.vm.v_page_count|vm.stats.vm.v_wire_count|vm.stats.vm.v_active_count|vm.stats.vm.v_inactive_count|vm.stats.vm.v_cache_count|vm.stats.vm.v_free_count|vm.stats.vm.v_page_size"', function (error, stdout) {
+          if (!error) {
+            let lines = stdout.toString().split('\n');
+            const pagesize = parseInt(util.getValue(lines, 'vm.stats.vm.v_page_size'), 10);
+            const inactive = parseInt(util.getValue(lines, 'vm.stats.vm.v_inactive_count'), 10) * pagesize;
+            const cache = parseInt(util.getValue(lines, 'vm.stats.vm.v_cache_count'), 10) * pagesize;
+
+            result.total = parseInt(util.getValue(lines, 'hw.realmem'), 10);
+            if (isNaN(result.total)) result.total = parseInt(util.getValue(lines, 'hw.physmem'), 10);
+            result.free = parseInt(util.getValue(lines, 'vm.stats.vm.v_free_count'), 10) * pagesize;
+            result.buffcache = inactive + cache;
+            result.available = result.buffcache + result.free;
+            result.active = result.total - result.free - result.buffcache;
+
+            result.swaptotal = 0;
+            result.swapfree = 0;
+            result.swapused = 0;
+
+          }
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      }
+      if (_sunos) {
+        if (callback) { callback(result); }
+        resolve(result);
+      }
+      if (_darwin) {
+        exec('vm_stat | grep "Pages active"', function (error, stdout) {
+          if (!error) {
+            let lines = stdout.toString().split('\n');
+
+            result.active = parseInt(lines[0].split(':')[1], 10) * 4096;
+            result.buffcache = result.used - result.active;
+            result.available = result.free + result.buffcache;
+          }
+          exec('sysctl -n vm.swapusage', function (error, stdout) {
+            if (!error) {
+              let lines = stdout.toString().split('\n');
+              if (lines.length > 0) {
+                let line = lines[0].replace(/,/g, '.').replace(/M/g, '');
+                line = line.trim().split('  ');
+                for (let i = 0; i < line.length; i++) {
+                  if (line[i].toLowerCase().indexOf('total') !== -1) result.swaptotal = parseFloat(line[i].split('=')[1].trim()) * 1024 * 1024;
+                  if (line[i].toLowerCase().indexOf('used') !== -1) result.swapused = parseFloat(line[i].split('=')[1].trim()) * 1024 * 1024;
+                  if (line[i].toLowerCase().indexOf('free') !== -1) result.swapfree = parseFloat(line[i].split('=')[1].trim()) * 1024 * 1024;
+                }
+              }
+            }
+            if (callback) { callback(result); }
+            resolve(result);
+          });
+        });
+      }
+      if (_windows) {
+        let swaptotal = 0;
+        let swapused = 0;
+        try {
+          exec(util.getWmic() + ' pagefile get AllocatedBaseSize, CurrentUsage', opts, function (error, stdout) {
+            if (!error) {
+              let lines = stdout.split('\r\n').filter(line => line.trim() !== '').filter((line, idx) => idx > 0);
+              lines.forEach(function (line) {
+                if (line !== '') {
+                  line = line.trim().split(/\s\s+/);
+                  swaptotal = swaptotal + parseInt(line[0], 10);
+                  swapused = swapused + parseInt(line[1], 10);
+                }
+              });
+            }
+            result.swaptotal = swaptotal * 1024 * 1024;
+            result.swapused = swapused * 1024 * 1024;
+            result.swapfree = result.swaptotal - result.swapused;
+
+            if (callback) { callback(result); }
+            resolve(result);
+          });
+        } catch (e) {
+          if (callback) { callback(result); }
+          resolve(result);
+        }
+      }
+    });
+  });
+}
+
+exports.mem = mem;
+
+function memLayout(callback) {
+
+  function getManufacturer(manId) {
+    if (OSX_RAM_manufacturers.hasOwnProperty(manId)) {
+      return (OSX_RAM_manufacturers[manId]);
+    }
+    return manId;
+  }
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+
+      let result = [];
+
+      if (_linux || _freebsd || _openbsd) {
+        exec('dmidecode -t memory | grep -iE "Size:|Type|Speed|Manufacturer|Form Factor|Locator|Memory Device|Serial Number|Voltage|Part Number"', function (error, stdout) {
+          if (!error) {
+            let devices = stdout.toString().split('Memory Device');
+            devices.shift();
+            devices.forEach(function (device) {
+              let lines = device.split('\n');
+              if (parseInt(util.getValue(lines, 'Size'), 10) > 0) {
+                result.push({
+                  size: parseInt(util.getValue(lines, 'Size'), 10) * 1024 * 1024,
+                  bank: util.getValue(lines, 'Bank Locator'),
+                  type: util.getValue(lines, 'Type:'),
+                  clockSpeed: (util.getValue(lines, 'Configured Clock Speed:') ? parseInt(util.getValue(lines, 'Configured Clock Speed:'), 10) : (util.getValue(lines, 'Speed:') ? parseInt(util.getValue(lines, 'Speed:'), 10) : -1)),
+                  formFactor: util.getValue(lines, 'Form Factor:'),
+                  manufacturer: util.getValue(lines, 'Manufacturer:'),
+                  partNum: util.getValue(lines, 'Part Number:'),
+                  serialNum: util.getValue(lines, 'Serial Number:'),
+                  voltageConfigured: parseFloat(util.getValue(lines, 'Configured Voltage:') || -1),
+                  voltageMin: parseFloat(util.getValue(lines, 'Minimum Voltage:') || -1),
+                  voltageMax: parseFloat(util.getValue(lines, 'Maximum Voltage:') || -1),
+                });
+              } else {
+                result.push({
+                  size: 0,
+                  bank: util.getValue(lines, 'Bank Locator'),
+                  type: 'Empty',
+                  clockSpeed: 0,
+                  formFactor: util.getValue(lines, 'Form Factor:'),
+                  partNum: '',
+                  serialNum: '',
+                  voltageConfigured: -1,
+                  voltageMin: -1,
+                  voltageMax: -1,
+                });
+              }
+            });
+          }
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      }
+
+      if (_darwin) {
+        exec('system_profiler SPMemoryDataType', function (error, stdout) {
+          if (!error) {
+            let devices = stdout.toString().split('        BANK ');
+            devices.shift();
+            devices.forEach(function (device) {
+              let lines = device.split('\n');
+              const bank = 'BANK ' + lines[0].trim();
+              const size = parseInt(util.getValue(lines, '          Size'));
+              if (size) {
+                result.push({
+                  size: size * 1024 * 1024 * 1024,
+                  bank: bank,
+                  type: util.getValue(lines, '          Type:'),
+                  clockSpeed: parseInt(util.getValue(lines, '          Speed:'), 10),
+                  formFactor: '',
+                  manufacturer: getManufacturer(util.getValue(lines, '          Manufacturer:')),
+                  partNum: util.getValue(lines, '          Part Number:'),
+                  serialNum: util.getValue(lines, '          Serial Number:'),
+                  voltageConfigured: -1,
+                  voltageMin: -1,
+                  voltageMax: -1,
+                });
+              } else {
+                result.push({
+                  size: 0,
+                  bank: bank,
+                  type: 'Empty',
+                  clockSpeed: 0,
+                  formFactor: '',
+                  manufacturer: '',
+                  partNum: '',
+                  serialNum: '',
+                  voltageConfigured: -1,
+                  voltageMin: -1,
+                  voltageMax: -1,
+                });
+              }
+            });
+          }
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      }
+      if (_sunos) {
+        if (callback) { callback(result); }
+        resolve(result);
+      }
+      if (_windows) {
+        const memoryTypes = 'Unknown|Other|DRAM|Synchronous DRAM|Cache DRAM|EDO|EDRAM|VRAM|SRAM|RAM|ROM|FLASH|EEPROM|FEPROM|EPROM|CDRAM|3DRAM|SDRAM|SGRAM|RDRAM|DDR|DDR2|DDR2 FB-DIMM|Reserved|DDR3|FBD2|DDR4|LPDDR|LPDDR2|LPDDR3|LPDDR4'.split('|');
+        const FormFactors = 'Unknown|Other|SIP|DIP|ZIP|SOJ|Proprietary|SIMM|DIMM|TSOP|PGA|RIMM|SODIMM|SRIMM|SMD|SSMP|QFP|TQFP|SOIC|LCC|PLCC|BGA|FPBGA|LGA'.split('|');
+
+        try {
+          exec(util.getWmic() + ' memorychip get BankLabel, Capacity, ConfiguredClockSpeed, ConfiguredVoltage, MaxVoltage, MinVoltage, DataWidth, FormFactor, Manufacturer, MemoryType, PartNumber, SerialNumber, Speed, Tag /value', opts, function (error, stdout) {
+            if (!error) {
+              let devices = stdout.toString().split('BankL');
+              devices.shift();
+              devices.forEach(function (device) {
+                let lines = device.split('\r\n');
+                result.push({
+                  size: parseInt(util.getValue(lines, 'Capacity', '='), 10),
+                  bank: util.getValue(lines, 'abel', '='), // BankLabel
+                  type: memoryTypes[parseInt(util.getValue(lines, 'MemoryType', '='), 10)],
+                  clockSpeed: parseInt(util.getValue(lines, 'ConfiguredClockSpeed', '='), 10),
+                  formFactor: FormFactors[parseInt(util.getValue(lines, 'FormFactor', '='), 10)],
+                  manufacturer: util.getValue(lines, 'Manufacturer', '='),
+                  partNum: util.getValue(lines, 'PartNumber', '='),
+                  serialNum: util.getValue(lines, 'SerialNumber', '='),
+                  voltageConfigured: parseInt(util.getValue(lines, 'ConfiguredVoltage', '='), 10) / 1000.0,
+                  voltageMin: parseInt(util.getValue(lines, 'MinVoltage', '='), 10) / 1000.0,
+                  voltageMax: parseInt(util.getValue(lines, 'MaxVoltage', '='), 10) / 1000.0,
+                });
+              });
+            }
+            if (callback) { callback(result); }
+            resolve(result);
+          });
+        } catch (e) {
+          if (callback) { callback(result); }
+          resolve(result);
+        }
+      }
+    });
+  });
+}
+
+exports.memLayout = memLayout;
+
+
+
+/***/ }),
+
+/***/ "./node_modules/systeminformation/lib/network.js":
+/*!*******************************************************!*\
+  !*** ./node_modules/systeminformation/lib/network.js ***!
+  \*******************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+// ==================================================================================
+// network.js
+// ----------------------------------------------------------------------------------
+// Description:   System Information - library
+//                for Node.js
+// Copyright:     (c) 2014 - 2018
+// Author:        Sebastian Hildebrandt
+// ----------------------------------------------------------------------------------
+// License:       MIT
+// ==================================================================================
+// 9. Network
+// ----------------------------------------------------------------------------------
+
+const os = __webpack_require__(/*! os */ "os");
+const exec = __webpack_require__(/*! child_process */ "child_process").exec;
+const execSync = __webpack_require__(/*! child_process */ "child_process").execSync;
+const fs = __webpack_require__(/*! fs */ "fs");
+const util = __webpack_require__(/*! ./util */ "./node_modules/systeminformation/lib/util.js");
+
+let _platform = process.platform;
+
+const _linux = (_platform === 'linux');
+const _darwin = (_platform === 'darwin');
+const _windows = (_platform === 'win32');
+const _freebsd = (_platform === 'freebsd');
+const _openbsd = (_platform === 'openbsd');
+const _sunos = (_platform === 'sunos');
+
+const opts = {
+  windowsHide: true,
+  maxBuffer: 1024 * 2000
+};
+
+let _network = {};
+let _default_iface;
+let _mac = {};
+let isIpAvailable;
+
+function getDefaultNetworkInterface() {
+
+  let ifaces = os.networkInterfaces();
+  let ifacename = '';
+  let scopeid = 9999;
+
+  // fallback - "first" external interface (sorted by scopeid)
+  for (let dev in ifaces) {
+    if (ifaces.hasOwnProperty(dev)) {
+      ifaces[dev].forEach(function (details) {
+        if (details && details.internal === false && details.scopeid && details.scopeid < scopeid) {
+          ifacename = dev;
+          scopeid = details.scopeid;
+        }
+      });
+    }
+  }
+  if (_linux || _darwin || _freebsd || _openbsd || _sunos) {
+    let cmd = '';
+    if (_linux) cmd = 'route 2>/dev/null | grep default | awk \'{print $8}\'';
+    if (_darwin) cmd = 'route get 0.0.0.0 2>/dev/null | grep interface: | awk \'{print $2}\'';
+    if (_freebsd || _openbsd || _sunos) cmd = 'route get 0.0.0.0 | grep interface:';
+    let result = execSync(cmd);
+    ifacename = result.toString().split('\n')[0];
+    if (ifacename.indexOf(':') > -1) {
+      ifacename = ifacename.split(':')[1].trim();
+    }
+  }
+
+  if (ifacename) _default_iface = ifacename;
+  return _default_iface;
+}
+
+exports.getDefaultNetworkInterface = getDefaultNetworkInterface;
+
+function getMacAddresses() {
+  let iface = '';
+  let mac = '';
+  let result = {};
+  if (_linux || _freebsd || _openbsd) {
+    if (typeof isIpAvailable === 'undefined') {
+      if (fs.existsSync('/sbin/ip')) {
+        isIpAvailable = true;
+      } else {
+        isIpAvailable = false;
+      }
+    }
+    const cmd = 'export LC_ALL=C; /sbin/' + ((isIpAvailable) ? 'ip link show up' : 'ifconfig') + '; unset LC_ALL';
+    let res = execSync(cmd);
+    const lines = res.toString().split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i] && lines[i][0] !== ' ') {
+        if (isIpAvailable) {
+          let nextline = lines[i + 1].trim().split(' ');
+          if (nextline[0] === 'link/ether') {
+            iface = lines[i].split(' ')[1];
+            iface = iface.slice(0, iface.length - 1);
+            mac = nextline[1];
+          }
+        } else {
+          iface = lines[i].split(' ')[0];
+          mac = lines[i].split('HWaddr ')[1];
+        }
+
+        if (iface && mac) {
+          result[iface] = mac.trim();
+          iface = '';
+          mac = '';
+        }
+      }
+    }
+  }
+  if (_darwin) {
+    const cmd = '/sbin/ifconfig';
+    let res = execSync(cmd);
+    const lines = res.toString().split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i] && lines[i][0] !== '\t' && lines[i].indexOf(':') > 0) {
+        iface = lines[i].split(':')[0];
+      } else if (lines[i].indexOf('\tether ') === 0) {
+        mac = lines[i].split('\tether ')[1];
+        if (iface && mac) {
+          result[iface] = mac.trim();
+          iface = '';
+          mac = '';
+        }
+      }
+    }
+  }
+  return result;
+}
+
+function networkInterfaceDefault(callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      let result = getDefaultNetworkInterface();
+      if (callback) { callback(result); }
+      resolve(result);
+    });
+  });
+}
+
+exports.networkInterfaceDefault = networkInterfaceDefault;
+
+// --------------------------
+// NET - interfaces
+
+function networkInterfaces(callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      let ifaces = os.networkInterfaces();
+      let result = [];
+
+      for (let dev in ifaces) {
+        let ip4 = '';
+        let ip6 = '';
+        let mac = '';
+        if (ifaces.hasOwnProperty(dev)) {
+          ifaces[dev].forEach(function (details) {
+            if (details.family === 'IPv4') {
+              ip4 = details.address;
+            }
+            if (details.family === 'IPv6') {
+              if (!ip6 || ip6.match(/^fe80::/i)) {
+                ip6 = details.address;
+              }
+            }
+            mac = details.mac;
+            if (mac.indexOf('00:00:0') > -1 && (_linux || _darwin)) {
+              if (Object.keys(_mac).length === 0) {
+                _mac = getMacAddresses();
+              }
+              mac = _mac[dev] || '';
+            }
+          });
+          let internal = (ifaces[dev] && ifaces[dev][0]) ? ifaces[dev][0].internal : null;
+          result.push({ iface: dev, ip4: ip4, ip6: ip6, mac: mac, internal: internal });
+        }
+      }
+      if (callback) { callback(result); }
+      resolve(result);
+    });
+  });
+}
+
+exports.networkInterfaces = networkInterfaces;
+
+// --------------------------
+// NET - Speed
+
+function calcNetworkSpeed(iface, rx, tx, operstate) {
+  let result = {
+    iface: iface,
+    operstate: operstate,
+    rx: rx,
+    tx: tx,
+    rx_sec: -1,
+    tx_sec: -1,
+    ms: 0
+  };
+
+  if (_network[iface] && _network[iface].ms) {
+    result.ms = Date.now() - _network[iface].ms;
+    result.rx_sec = (rx - _network[iface].rx) >= 0 ? (rx - _network[iface].rx) / (result.ms / 1000) : 0;
+    result.tx_sec = (tx - _network[iface].tx) >= 0 ? (tx - _network[iface].tx) / (result.ms / 1000) : 0;
+    _network[iface].rx = rx;
+    _network[iface].tx = tx;
+    _network[iface].rx_sec = result.rx_sec;
+    _network[iface].tx_sec = result.tx_sec;
+    _network[iface].ms = Date.now();
+    _network[iface].last_ms = result.ms;
+    _network[iface].operstate = operstate;
+  } else {
+    if (!_network[iface]) _network[iface] = {};
+    _network[iface].rx = rx;
+    _network[iface].tx = tx;
+    _network[iface].rx_sec = -1;
+    _network[iface].tx_sec = -1;
+    _network[iface].ms = Date.now();
+    _network[iface].last_ms = 0;
+    _network[iface].operstate = operstate;
+  }
+  return result;
+}
+
+function networkStats(iface, callback) {
+
+  function parseLinesWindowsNics(sections) {
+    let nics = [];
+    for (let i in sections) {
+      if (sections.hasOwnProperty(i)) {
+        if (sections[i].trim() !== '') {
+
+          let lines = sections[i].trim().split('\r\n');
+          let netEnabled = util.getValue(lines, 'NetEnabled', '=');
+          if (netEnabled) {
+            nics.push({
+              mac: util.getValue(lines, 'MACAddress', '=').toLowerCase(),
+              name: util.getValue(lines, 'Name', '=').replace(/[()\[\] ]+/g, '').toLowerCase(),
+              netEnabled: netEnabled === 'TRUE'
+            });
+          }
+        }
+      }
+    }
+    return nics;
+  }
+
+  function parseLinesWindowsPerfData(sections) {
+    let perfData = [];
+    for (let i in sections) {
+      if (sections.hasOwnProperty(i)) {
+        if (sections[i].trim() !== '') {
+
+          let lines = sections[i].trim().split('\r\n');
+          perfData.push({
+            name: util.getValue(lines, 'Name', '=').replace(/[()\[\] ]+/g, '').toLowerCase(),
+            rx: parseInt(util.getValue(lines, 'BytesReceivedPersec', '='), 10),
+            tx: parseInt(util.getValue(lines, 'BytesSentPersec', '='), 10)
+          });
+        }
+      }
+    }
+    return perfData;
+  }
+
+
+  // fallback - if only callback is given
+  if (util.isFunction(iface) && !callback) {
+    callback = iface;
+    iface = '';
+  }
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+
+      iface = iface || getDefaultNetworkInterface();
+
+      let result = {
+        iface: iface,
+        operstate: 'unknown',
+        rx: 0,
+        tx: 0,
+        rx_sec: -1,
+        tx_sec: -1,
+        ms: 0
+      };
+
+      let operstate = 'unknown';
+      let rx = 0;
+      let tx = 0;
+
+      let cmd, lines, stats;
+      if (!_network[iface] || (_network[iface] && !_network[iface].ms) || (_network[iface] && _network[iface].ms && Date.now() - _network[iface].ms >= 500)) {
+        if (_linux) {
+          if (fs.existsSync('/sys/class/net/' + iface)) {
+            cmd =
+              'cat /sys/class/net/' + iface + '/operstate; ' +
+              'cat /sys/class/net/' + iface + '/statistics/rx_bytes; ' +
+              'cat /sys/class/net/' + iface + '/statistics/tx_bytes; ';
+            exec(cmd, function (error, stdout) {
+              if (!error) {
+                lines = stdout.toString().split('\n');
+                operstate = lines[0].trim();
+                rx = parseInt(lines[1]);
+                tx = parseInt(lines[2]);
+
+                result = calcNetworkSpeed(iface, rx, tx, operstate);
+
+              }
+              if (callback) { callback(result); }
+              resolve(result);
+            });
+          } else {
+            if (callback) { callback(result); }
+            resolve(result);
+          }
+        }
+        if (_freebsd || _openbsd) {
+          cmd = 'netstat -ibnI ' + iface;
+          exec(cmd, function (error, stdout) {
+            if (!error) {
+              lines = stdout.toString().split('\n');
+              for (let i = 1; i < lines.length; i++) {
+                const line = lines[i].replace(/ +/g, ' ').split(' ');
+                if (line && line[0] && line[7] && line[10]) {
+                  rx = rx + parseInt(line[7]);
+                  tx = tx + parseInt(line[10]);
+                  operstate = 'up';
+                }
+              }
+              result = calcNetworkSpeed(iface, rx, tx, operstate);
+            }
+            if (callback) { callback(result); }
+            resolve(result);
+          });
+        }
+        if (_darwin) {
+          cmd = 'ifconfig ' + iface + ' | grep "status"';
+          exec(cmd, function (error, stdout) {
+            result.operstate = (stdout.toString().split(':')[1] || '').trim();
+            result.operstate = (result.operstate || '').toLowerCase();
+            result.operstate = (result.operstate === 'active' ? 'up' : (result.operstate === 'inactive' ? 'down' : 'unknown'));
+            cmd = 'netstat -bI ' + iface;
+            exec(cmd, function (error, stdout) {
+              if (!error) {
+                lines = stdout.toString().split('\n');
+                // if there is less than 2 lines, no information for this interface was found
+                if (lines.length > 1 && lines[1].trim() !== '') {
+                  // skip header line
+                  // use the second line because it is tied to the NIC instead of the ipv4 or ipv6 address
+                  stats = lines[1].replace(/ +/g, ' ').split(' ');
+                  rx = parseInt(stats[6]);
+                  tx = parseInt(stats[9]);
+
+                  result = calcNetworkSpeed(iface, rx, tx, result.operstate);
+                }
+              }
+              if (callback) { callback(result); }
+              resolve(result);
+            });
+          });
+        }
+        if (_windows) {
+          // NICs
+          let perfData = [];
+          let nics = [];
+          cmd = util.getWmic() + ' nic get MACAddress, name, NetEnabled /value';
+          try {
+            exec(cmd, opts, function (error, stdout) {
+              if (!error) {
+                const nsections = stdout.split(/\n\s*\n/);
+                nics = parseLinesWindowsNics(nsections);
+
+                // Performance Data
+                cmd = util.getWmic() + ' path Win32_PerfRawData_Tcpip_NetworkInterface Get name,BytesReceivedPersec,BytesSentPersec,BytesTotalPersec /value';
+                exec(cmd, opts, function (error, stdout) {
+                  if (!error) {
+                    const psections = stdout.split(/\n\s*\n/);
+                    perfData = parseLinesWindowsPerfData(psections);
+                  }
+
+                  // Network Interfaces
+                  networkInterfaces().then(interfaces => {
+                    // get mac from 'interfaces' by interfacename
+                    let mac = '';
+                    interfaces.forEach(detail => {
+                      if (detail.iface === iface) {
+                        mac = detail.mac;
+                      }
+                    });
+
+                    // get name from 'nics' (by macadress)
+                    let name = '';
+                    nics.forEach(detail => {
+                      if (detail.mac === mac) {
+                        name = detail.name;
+                        operstate = (detail.netEnabled ? 'up' : 'down');
+                      }
+                    });
+
+                    // get bytes sent, received from perfData by name
+                    rx = 0;
+                    tx = 0;
+                    perfData.forEach(detail => {
+                      if (detail.name === name) {
+                        rx = detail.rx;
+                        tx = detail.tx;
+                      }
+                    });
+
+                    if (rx && tx) {
+                      result = calcNetworkSpeed(iface, parseInt(rx), parseInt(tx), operstate);
+                    }
+                    if (callback) { callback(result); }
+                    resolve(result);
+                  });
+                });
+              }
+            });
+          } catch (e) {
+            if (callback) { callback(result); }
+            resolve(result);
+          }
+        }
+      } else {
+        result.rx = _network[iface].rx;
+        result.tx = _network[iface].tx;
+        result.rx_sec = _network[iface].rx_sec;
+        result.tx_sec = _network[iface].tx_sec;
+        result.ms = _network[iface].last_ms;
+        result.operstate = _network[iface].operstate;
+        if (callback) { callback(result); }
+        resolve(result);
+      }
+    });
+  });
+}
+
+exports.networkStats = networkStats;
+
+// --------------------------
+// NET - connections (sockets)
+
+function networkConnections(callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      let result = [];
+      if (_linux || _freebsd || _openbsd) {
+        let cmd = 'netstat -tuna | grep "ESTABLISHED\\|SYN_SENT\\|SYN_RECV\\|FIN_WAIT1\\|FIN_WAIT2\\|TIME_WAIT\\|CLOSE\\|CLOSE_WAIT\\|LAST_ACK\\|LISTEN\\|CLOSING\\|UNKNOWN\\|VERBUNDEN"';
+        if (_freebsd || _openbsd) cmd = 'netstat -na | grep "ESTABLISHED\\|SYN_SENT\\|SYN_RECV\\|FIN_WAIT1\\|FIN_WAIT2\\|TIME_WAIT\\|CLOSE\\|CLOSE_WAIT\\|LAST_ACK\\|LISTEN\\|CLOSING\\|UNKNOWN\\|VERBUNDEN"';
+        exec(cmd, { maxBuffer: 1024 * 2000 }, function (error, stdout) {
+          if (!error) {
+            let lines = stdout.toString().split('\n');
+            lines.forEach(function (line) {
+              line = line.replace(/ +/g, ' ').split(' ');
+              if (line.length >= 6) {
+                let localip = line[3];
+                let localport = '';
+                let localaddress = line[3].split(':');
+                if (localaddress.length > 1) {
+                  localport = localaddress[localaddress.length - 1];
+                  localaddress.pop();
+                  localip = localaddress.join(':');
+                }
+                let peerip = line[4];
+                let peerport = '';
+                let peeraddress = line[4].split(':');
+                if (peeraddress.length > 1) {
+                  peerport = peeraddress[peeraddress.length - 1];
+                  peeraddress.pop();
+                  peerip = peeraddress.join(':');
+                }
+                let connstate = line[5];
+                if (connstate === 'VERBUNDEN') connstate = 'ESTABLISHED';
+                if (connstate) {
+                  result.push({
+                    protocol: line[0],
+                    localaddress: localip,
+                    localport: localport,
+                    peeraddress: peerip,
+                    peerport: peerport,
+                    state: connstate
+                  });
+                }
+              }
+            });
+            if (callback) {
+              callback(result);
+            }
+            resolve(result);
+          } else {
+            cmd = 'ss -tuna | grep "ESTAB\\|SYN-SENT\\|SYN-RECV\\|FIN-WAIT1\\|FIN-WAIT2\\|TIME-WAIT\\|CLOSE\\|CLOSE-WAIT\\|LAST-ACK\\|LISTEN\\|CLOSING"';
+            exec(cmd, { maxBuffer: 1024 * 2000 }, function (error, stdout) {
+
+              if (!error) {
+                let lines = stdout.toString().split('\n');
+                lines.forEach(function (line) {
+                  line = line.replace(/ +/g, ' ').split(' ');
+                  if (line.length >= 6) {
+                    let localip = line[4];
+                    let localport = '';
+                    let localaddress = line[4].split(':');
+                    if (localaddress.length > 1) {
+                      localport = localaddress[localaddress.length - 1];
+                      localaddress.pop();
+                      localip = localaddress.join(':');
+                    }
+                    let peerip = line[5];
+                    let peerport = '';
+                    let peeraddress = line[5].split(':');
+                    if (peeraddress.length > 1) {
+                      peerport = peeraddress[peeraddress.length - 1];
+                      peeraddress.pop();
+                      peerip = peeraddress.join(':');
+                    }
+                    let connstate = line[1];
+                    if (connstate === 'ESTAB') connstate = 'ESTABLISHED';
+                    if (connstate === 'TIME-WAIT') connstate = 'TIME_WAIT';
+                    if (connstate) {
+                      result.push({
+                        protocol: line[0],
+                        localaddress: localip,
+                        localport: localport,
+                        peeraddress: peerip,
+                        peerport: peerport,
+                        state: connstate
+                      });
+                    }
+                  }
+                });
+              }
+              if (callback) {
+                callback(result);
+              }
+              resolve(result);
+            });
+          }
+        });
+      }
+      if (_darwin) {
+        let cmd = 'netstat -nat | grep "ESTABLISHED\\|SYN_SENT\\|SYN_RECV\\|FIN_WAIT1\\|FIN_WAIT2\\|TIME_WAIT\\|CLOSE\\|CLOSE_WAIT\\|LAST_ACK\\|LISTEN\\|CLOSING\\|UNKNOWN"';
+        exec(cmd, { maxBuffer: 1024 * 2000 }, function (error, stdout) {
+          if (!error) {
+
+            let lines = stdout.toString().split('\n');
+
+            lines.forEach(function (line) {
+              line = line.replace(/ +/g, ' ').split(' ');
+              if (line.length >= 6) {
+                let localip = line[3];
+                let localport = '';
+                let localaddress = line[3].split('.');
+                if (localaddress.length > 1) {
+                  localport = localaddress[localaddress.length - 1];
+                  localaddress.pop();
+                  localip = localaddress.join('.');
+                }
+                let peerip = line[4];
+                let peerport = '';
+                let peeraddress = line[4].split('.');
+                if (peeraddress.length > 1) {
+                  peerport = peeraddress[peeraddress.length - 1];
+                  peeraddress.pop();
+                  peerip = peeraddress.join('.');
+                }
+                let connstate = line[5];
+                if (connstate) {
+                  result.push({
+                    protocol: line[0],
+                    localaddress: localip,
+                    localport: localport,
+                    peeraddress: peerip,
+                    peerport: peerport,
+                    state: connstate
+                  });
+                }
+              }
+            });
+            if (callback) {
+              callback(result);
+            }
+            resolve(result);
+          }
+        });
+      }
+      if (_windows) {
+        let cmd = 'netstat -na';
+        try {
+          exec(cmd, opts, function (error, stdout) {
+            if (!error) {
+
+              let lines = stdout.toString().split('\r\n');
+
+              lines.forEach(function (line) {
+                line = line.trim().replace(/ +/g, ' ').split(' ');
+                if (line.length >= 4) {
+                  let localip = line[1];
+                  let localport = '';
+                  let localaddress = line[1].split(':');
+                  if (localaddress.length > 1) {
+                    localport = localaddress[localaddress.length - 1];
+                    localaddress.pop();
+                    localip = localaddress.join(':');
+                  }
+                  let peerip = line[2];
+                  let peerport = '';
+                  let peeraddress = line[2].split(':');
+                  if (peeraddress.length > 1) {
+                    peerport = peeraddress[peeraddress.length - 1];
+                    peeraddress.pop();
+                    peerip = peeraddress.join(':');
+                  }
+                  let connstate = line[3];
+                  if (connstate === 'HERGESTELLT') connstate = 'ESTABLISHED';
+                  if (connstate.startsWith('ABH')) connstate = 'LISTEN';
+                  if (connstate === 'SCHLIESSEN_WARTEN') connstate = 'CLOSE_WAIT';
+                  if (connstate === 'WARTEND') connstate = 'TIME_WAIT';
+                  if (connstate === 'SYN_GESENDET') connstate = 'SYN_SENT';
+
+                  if (connstate === 'LISTENING') connstate = 'LISTEN';
+                  if (connstate === 'SYN_RECEIVED') connstate = 'SYN_RECV';
+                  if (connstate === 'FIN_WAIT_1') connstate = 'FIN_WAIT1';
+                  if (connstate === 'FIN_WAIT_2') connstate = 'FIN_WAIT2';
+                  if (connstate) {
+                    result.push({
+                      protocol: line[0].toLowerCase(),
+                      localaddress: localip,
+                      localport: localport,
+                      peeraddress: peerip,
+                      peerport: peerport,
+                      state: connstate
+                    });
+                  }
+                }
+              });
+              if (callback) {
+                callback(result);
+              }
+              resolve(result);
+            }
+          });
+        } catch (e) {
+          if (callback) { callback(result); }
+          resolve(result);
+        }
+      }
+    });
+  });
+}
+
+exports.networkConnections = networkConnections;
+
+
+/***/ }),
+
+/***/ "./node_modules/systeminformation/lib/osinfo.js":
+/*!******************************************************!*\
+  !*** ./node_modules/systeminformation/lib/osinfo.js ***!
+  \******************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+// ==================================================================================
+// osinfo.js
+// ----------------------------------------------------------------------------------
+// Description:   System Information - library
+//                for Node.js
+// Copyright:     (c) 2014 - 2018
+// Author:        Sebastian Hildebrandt
+// ----------------------------------------------------------------------------------
+// License:       MIT
+// ==================================================================================
+// 3. Operating System
+// ----------------------------------------------------------------------------------
+
+const os = __webpack_require__(/*! os */ "os");
+const exec = __webpack_require__(/*! child_process */ "child_process").exec;
+const util = __webpack_require__(/*! ./util */ "./node_modules/systeminformation/lib/util.js");
+
+let _platform = process.platform;
+
+const _linux = (_platform === 'linux');
+const _darwin = (_platform === 'darwin');
+const _windows = (_platform === 'win32');
+const _freebsd = (_platform === 'freebsd');
+const _openbsd = (_platform === 'openbsd');
+const _sunos = (_platform === 'sunos');
+
+const opts = {
+  windowsHide: true
+};
+
+const NOT_SUPPORTED = 'not supported';
+
+// --------------------------
+// Get current time and OS uptime
+
+function time() {
+  let t = new Date().toString().split(' ');
+
+  return {
+    current: Date.now(),
+    uptime: os.uptime(),
+    timezone: (t.length >= 7) ? t[5] : '',
+    timezoneName: (t.length >= 7) ? t.slice(6).join(' ').replace(/\(/g, '').replace(/\)/g, '') : ''
+  };
+}
+
+exports.time = time;
+
+// --------------------------
+// Get logo filename of OS distribution
+
+function getLogoFile(distro) {
+  distro = distro || '';
+  distro = distro.toLowerCase();
+  let result = _platform;
+  if (_windows) {
+    result = 'windows';
+  }
+  else if (distro.indexOf('mac os') !== -1) {
+    result = 'apple';
+  }
+  else if (distro.indexOf('arch') !== -1) {
+    result = 'arch';
+  }
+  else if (distro.indexOf('centos') !== -1) {
+    result = 'centos';
+  }
+  else if (distro.indexOf('coreos') !== -1) {
+    result = 'coreos';
+  }
+  else if (distro.indexOf('debian') !== -1) {
+    result = 'debian';
+  }
+  else if (distro.indexOf('deepin') !== -1) {
+    result = 'deepin';
+  }
+  else if (distro.indexOf('elementary') !== -1) {
+    result = 'elementary';
+  }
+  else if (distro.indexOf('fedora') !== -1) {
+    result = 'fedora';
+  }
+  else if (distro.indexOf('gentoo') !== -1) {
+    result = 'gentoo';
+  }
+  else if (distro.indexOf('mageia') !== -1) {
+    result = 'mageia';
+  }
+  else if (distro.indexOf('mandriva') !== -1) {
+    result = 'mandriva';
+  }
+  else if (distro.indexOf('manjaro') !== -1) {
+    result = 'manjaro';
+  }
+  else if (distro.indexOf('mint') !== -1) {
+    result = 'mint';
+  }
+  else if (distro.indexOf('openbsd') !== -1) {
+    result = 'openbsd';
+  }
+  else if (distro.indexOf('freebsd') !== -1) {
+    result = 'freebsd';
+  }
+  else if (distro.indexOf('opensuse') !== -1) {
+    result = 'opensuse';
+  }
+  else if (distro.indexOf('pclinuxos') !== -1) {
+    result = 'pclinuxos';
+  }
+  else if (distro.indexOf('puppy') !== -1) {
+    result = 'puppy';
+  }
+  else if (distro.indexOf('raspbian') !== -1) {
+    result = 'raspbian';
+  }
+  else if (distro.indexOf('reactos') !== -1) {
+    result = 'reactos';
+  }
+  else if (distro.indexOf('redhat') !== -1) {
+    result = 'redhat';
+  }
+  else if (distro.indexOf('slackware') !== -1) {
+    result = 'slackware';
+  }
+  else if (distro.indexOf('sugar') !== -1) {
+    result = 'sugar';
+  }
+  else if (distro.indexOf('steam') !== -1) {
+    result = 'steam';
+  }
+  else if (distro.indexOf('suse') !== -1) {
+    result = 'suse';
+  }
+  else if (distro.indexOf('mate') !== -1) {
+    result = 'ubuntu-mate';
+  }
+  else if (distro.indexOf('lubuntu') !== -1) {
+    result = 'lubuntu';
+  }
+  else if (distro.indexOf('xubuntu') !== -1) {
+    result = 'xubuntu';
+  }
+  else if (distro.indexOf('ubuntu') !== -1) {
+    result = 'ubuntu';
+  }
+  else if (distro.indexOf('solaris') !== -1) {
+    result = 'solaris';
+  }
+  return result;
+}
+
+// --------------------------
+// OS Information
+
+function osInfo(callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      let result = {
+
+        platform: (_platform === 'Windows_NT' ? 'Windows' : _platform),
+        distro: 'unknown',
+        release: 'unknown',
+        codename: '',
+        kernel: os.release(),
+        arch: os.arch(),
+        hostname: os.hostname(),
+        logofile: ''
+      };
+
+      if (_linux) {
+
+        exec('cat /etc/*-release', function (error, stdout) {
+          //if (!error) {
+          /**
+           * @namespace
+           * @property {string}  DISTRIB_ID
+           * @property {string}  NAME
+           * @property {string}  DISTRIB_RELEASE
+           * @property {string}  VERSION_ID
+           * @property {string}  DISTRIB_CODENAME
+           */
+          let release = {};
+          let lines = stdout.toString().split('\n');
+          lines.forEach(function (line) {
+            if (line.indexOf('=') !== -1) {
+              release[line.split('=')[0].trim().toUpperCase()] = line.split('=')[1].trim();
+            }
+          });
+          result.distro = (release.DISTRIB_ID || release.NAME || 'unknown').replace(/"/g, '');
+          result.logofile = getLogoFile(result.distro);
+          result.release = (release.DISTRIB_RELEASE || release.VERSION_ID || 'unknown').replace(/"/g, '');
+          result.codename = (release.DISTRIB_CODENAME || '').replace(/"/g, '');
+          //}
+          if (callback) {
+            callback(result);
+          }
+          resolve(result);
+        });
+      }
+      if (_freebsd || _openbsd) {
+
+        exec('sysctl kern.ostype kern.osrelease kern.osrevision', function (error, stdout) {
+          if (!error) {
+            let lines = stdout.toString().split('\n');
+            result.distro = util.getValue(lines, 'kern.ostype');
+            result.logofile = getLogoFile(result.distro);
+            result.release = util.getValue(lines, 'kern.osrelease').split('-')[0];
+            result.codename = '';
+          }
+          if (callback) {
+            callback(result);
+          }
+          resolve(result);
+        });
+      }
+      if (_darwin) {
+        exec('sw_vers', function (error, stdout) {
+          let lines = stdout.toString().split('\n');
+          lines.forEach(function (line) {
+            if (line.indexOf('ProductName') !== -1) {
+              result.distro = line.split(':')[1].trim();
+              result.logofile = getLogoFile(result.distro);
+            }
+            if (line.indexOf('ProductVersion') !== -1) result.release = line.split(':')[1].trim();
+          });
+          if (callback) {
+            callback(result);
+          }
+          resolve(result);
+        });
+      }
+      if (_sunos) {
+        result.release = result.kernel;
+        exec('uname -o', function (error, stdout) {
+          let lines = stdout.toString().split('\n');
+          result.distro = lines[0];
+          result.logofile = getLogoFile(result.distro);
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      }
+      if (_windows) {
+        result.logofile = getLogoFile();
+        result.release = result.kernel;
+        try {
+          exec(util.getWmic() + ' os get Caption', opts, function (error, stdout) {
+            result.distro = result.codename = stdout.slice(stdout.indexOf('\r\n') + 2).trim();
+            if (callback) {
+              callback(result);
+            }
+            resolve(result);
+          });  
+        } catch (e) {
+          if (callback) { callback(result); }
+          resolve(result);    
+        }
+      }
+    });
+  });
+}
+
+exports.osInfo = osInfo;
+
+function versions(callback) {
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      let result = {
+        kernel: os.release(),
+        openssl: process.versions.openssl,
+        node: process.versions.node,
+        v8: process.versions.v8,
+        npm: '',
+        yarn: '',
+        pm2: '',
+        gulp: '',
+        grunt: '',
+        git: '',
+        tsc: '',
+        mysql: '',
+        redis: '',
+        mongodb: '',
+        nginx: '',
+        php: ''
+      };
+
+      let functionProcessed = (function () {
+        let totalFunctions = 12;
+        return function () {
+          if (--totalFunctions === 0) {
+            if (callback) {
+              callback(result);
+            }
+            resolve(result);
+          }
+        };
+      })();
+
+      try {
+        exec('npm -v', function (error, stdout) {
+          if (!error) {
+            result.npm = stdout.toString().split('\n')[0];
+          }
+          functionProcessed();
+        });
+        exec('pm2 -v', function (error, stdout) {
+          if (!error) {
+            result.pm2 = stdout.toString().split('\n')[0].trim();
+          }
+          functionProcessed();
+        });
+        exec('yarn --version', function (error, stdout) {
+          if (!error) {
+            result.yarn = stdout.toString().split('\n')[0];
+          }
+          functionProcessed();
+        });
+        exec('gulp --version', function (error, stdout) {
+          if (!error) {
+            result.gulp = stdout.toString().split('\n')[0] || '';
+            result.gulp = (result.gulp.toLowerCase().split('version')[1] || '').trim();
+          }
+          functionProcessed();
+        });
+        exec('tsc --version', function (error, stdout) {
+          if (!error) {
+            result.tsc = stdout.toString().split('\n')[0] || '';
+            result.tsc = (result.tsc.toLowerCase().split('version')[1] || '').trim();
+          }
+          functionProcessed();
+        });
+        exec('grunt --version', function (error, stdout) {
+          if (!error) {
+            result.grunt = stdout.toString().split('\n')[0] || '';
+            result.grunt = (result.grunt.toLowerCase().split('cli v')[1] || '').trim();
+          }
+          functionProcessed();
+        });
+        exec('git --version', function (error, stdout) {
+          if (!error) {
+            result.git = stdout.toString().split('\n')[0] || '';
+            result.git = (result.git.toLowerCase().split('version')[1] || '').trim();
+            result.git = (result.git.split(' ')[0] || '').trim();
+          }
+          functionProcessed();
+        });
+        exec('nginx -v', function (error, stdout) {
+          if (!error) {
+            result.nginx = stdout.toString().split('\n')[0] || '';
+            result.nginx = (result.nginx.toLowerCase().split('/')[1] || '').trim();
+          }
+          functionProcessed();
+        });
+        exec('mysql -V', function (error, stdout) {
+          if (!error) {
+            result.mysql = stdout.toString().split('\n')[0] || '';
+            result.mysql = (result.mysql.toLowerCase().split(',')[0] || '').trim();
+            const parts = result.mysql.split(' ');
+            result.mysql = (parts[parts.length - 1] || '').trim();
+          }
+          functionProcessed();
+        });
+        exec('php -v', function (error, stdout) {
+          if (!error) {
+            result.php = stdout.toString().split('\n')[0] || '';
+            let parts = result.php.split('(');
+            if (parts[0].indexOf('-')) {
+              parts = parts[0].split('-');
+            }
+            result.php = parts[0].replace(/[^0-9.]/g, '');
+          }
+          functionProcessed();
+        });
+        exec('redis-server --version', function (error, stdout) {
+          if (!error) {
+            result.redis = stdout.toString().split('\n')[0] || '';
+            const parts = result.redis.split(' ');
+            result.redis = util.getValue(parts, 'v', '=', true);
+          }
+          functionProcessed();
+        });
+        exec('mongod --version', function (error, stdout) {
+          if (!error) {
+            result.mongodb = stdout.toString().split('\n')[0] || '';
+            result.mongodb = (result.mongodb.toLowerCase().split(',')[0] || '').replace(/[^0-9.]/g, '');
+          }
+          functionProcessed();
+        });  
+      } catch (e) {
+        if (callback) { callback(result); }
+        resolve(result);    
+      }
+    });
+  });
+}
+
+
+exports.versions = versions;
+
+function shell(callback) {
+  return new Promise((resolve, reject) => {
+    process.nextTick(() => {
+      if (_windows) {
+        let error = new Error(NOT_SUPPORTED);
+        if (callback) {
+          callback(NOT_SUPPORTED);
+        }
+        reject(error);
+      }
+
+      let result = '';
+      exec('echo $SHELL', function (error, stdout) {
+        if (!error) {
+          result = stdout.toString().split('\n')[0];
+        }
+        if (callback) {
+          callback(result);
+        }
+        resolve(result);
+      });
+    });
+  });
+}
+
+exports.shell = shell;
+
+
+/***/ }),
+
+/***/ "./node_modules/systeminformation/lib/processes.js":
+/*!*********************************************************!*\
+  !*** ./node_modules/systeminformation/lib/processes.js ***!
+  \*********************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+// ==================================================================================
+// processes.js
+// ----------------------------------------------------------------------------------
+// Description:   System Information - library
+//                for Node.js
+// Copyright:     (c) 2014 - 2018
+// Author:        Sebastian Hildebrandt
+// ----------------------------------------------------------------------------------
+// License:       MIT
+// ==================================================================================
+// 10. Processes
+// ----------------------------------------------------------------------------------
+
+const os = __webpack_require__(/*! os */ "os");
+const exec = __webpack_require__(/*! child_process */ "child_process").exec;
+const util = __webpack_require__(/*! ./util */ "./node_modules/systeminformation/lib/util.js");
+
+let _platform = process.platform;
+
+const _linux = (_platform === 'linux');
+const _darwin = (_platform === 'darwin');
+const _windows = (_platform === 'win32');
+const _freebsd = (_platform === 'freebsd');
+const _openbsd = (_platform === 'openbsd');
+const _sunos = (_platform === 'sunos');
+
+const NOT_SUPPORTED = 'not supported';
+
+let _process_cpu = {
+  all: 0,
+  list: {},
+  ms: 0,
+  result: {}
+};
+
+let _winStatusValues = {
+  '0': 'unknown',
+  '1': 'other',
+  '2': 'ready',
+  '3': 'running',
+  '4': 'blocked',
+  '5': 'suspended blocked',
+  '6': 'suspended ready',
+  '7': 'terminated',
+  '8': 'stopped',
+  '9': 'growing',
+};
+
+
+function parseTimeWin(time) {
+  time = time || '';
+  if (time) {
+    return (time.substr(0, 4) + '-' + time.substr(4, 2) + '-' + time.substr(6, 2) + ' ' + time.substr(8, 2) + ':' + time.substr(10, 2) + ':' + time.substr(12, 2));
+  } else {
+    return '';
+  }
+
+}
+
+// --------------------------
+// PS - services
+// pass a comma separated string with services to check (mysql, apache, postgresql, ...)
+// this function gives an array back, if the services are running.
+
+function services(srv, callback) {
+
+  // fallback - if only callback is given
+  if (util.isFunction(srv) && !callback) {
+    callback = srv;
+    srv = '';
+  }
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      if (srv) {
+        srv = srv.trim().toLowerCase().replace(/,+/g, ' ').replace(/  +/g, ' ').replace(/ +/g, '|');
+        let srvs = srv.split('|');
+        let data = [];
+        let dataSrv = [];
+
+        if (_linux || _freebsd || _openbsd || _darwin) {
+          let comm = (_darwin) ? 'ps -caxo pcpu,pmem,comm' : 'ps -axo pcpu,pmem,comm';
+          if (srv !== '' && srvs.length > 0) {
+            exec(comm + ' | grep -v grep | egrep "' + srv + '"', { maxBuffer: 1024 * 2000 }, function (error, stdout) {
+              if (!error) {
+                let lines = stdout.toString().replace(/ +/g, ' ').replace(/,+/g, '.').split('\n');
+                srvs.forEach(function (srv) {
+                  let ps = lines.filter(function (e) {
+                    return e.indexOf(srv) !== -1;
+                  });
+                  data.push({
+                    'name': srv,
+                    'running': ps.length > 0,
+                    'pcpu': parseFloat((ps.reduce(function (pv, cv) {
+                      return pv + parseFloat(cv.trim().split(' ')[0]);
+                    }, 0)).toFixed(2)),
+                    'pmem': parseFloat((ps.reduce(function (pv, cv) {
+                      return pv + parseFloat(cv.trim().split(' ')[1]);
+                    }, 0)).toFixed(2))
+                  });
+                });
+                if (callback) { callback(data); }
+                resolve(data);
+              } else {
+                exec('ps -o comm | grep -v grep | egrep "' + srv + '"', { maxBuffer: 1024 * 2000 }, function (error, stdout) {
+                  if (!error) {
+                    let lines = stdout.toString().replace(/ +/g, ' ').replace(/,+/g, '.').split('\n');
+                    srvs.forEach(function (srv) {
+                      let ps = lines.filter(function (e) {
+                        return e.indexOf(srv) !== -1;
+                      });
+                      data.push({
+                        'name': srv,
+                        'running': ps.length > 0,
+                        'pcpu': 0,
+                        'pmem': 0
+                      });
+                    });
+                    if (callback) { callback(data); }
+                    resolve(data);
+                  } else {
+                    srvs.forEach(function (srv) {
+                      data.push({
+                        'name': srv,
+                        'running': false,
+                        'pcpu': 0,
+                        'pmem': 0
+                      });
+                    });
+                    if (callback) { callback(data); }
+                    resolve(data);
+                  }
+                });
+              }
+            });
+          } else {
+            if (callback) { callback(data); }
+            resolve(data);
+          }
+        }
+        if (_windows) {
+          try {
+            exec(util.getWmic() + ' service get /value', { maxBuffer: 1024 * 1000, windowsHide: true }, function (error, stdout) {
+              if (!error) {
+                let serviceSections = stdout.split(/\n\s*\n/);
+                for (let i = 0; i < serviceSections.length; i++) {
+                  if (serviceSections[i].trim() !== '') {
+                    let lines = serviceSections[i].trim().split('\r\n');
+                    let srv = util.getValue(lines, 'Name', '=', true).toLowerCase();
+                    let started = util.getValue(lines, 'Started', '=', true);
+                    if (srvs.indexOf(srv) >= 0) {
+                      data.push({
+                        'name': srv,
+                        'running': (started === 'TRUE'),
+                        'pcpu': 0,
+                        'pmem': 0
+                      });
+                      dataSrv.push(srv);
+                    }
+                  }
+                }
+                let srvsMissing = srvs.filter(function (e) {
+                  return dataSrv.indexOf(e) === -1;
+                });
+                srvsMissing.forEach(function (srv) {
+                  data.push({
+                    'name': srv,
+                    'running': false,
+                    'pcpu': 0,
+                    'pmem': 0
+                  });
+                });
+
+                if (callback) { callback(data); }
+                resolve(data);
+              } else {
+                srvs.forEach(function (srv) {
+                  data.push({
+                    'name': srv,
+                    'running': false,
+                    'pcpu': 0,
+                    'pmem': 0
+                  });
+                });
+                if (callback) { callback(data); }
+                resolve(data);
+              }
+            });
+          } catch (e) {
+            if (callback) { callback(data); }
+            resolve(data);
+          }
+        }
+      } else {
+        if (callback) { callback({}); }
+        resolve({});
+      }
+    });
+  });
+}
+
+exports.services = services;
+
+// --------------------------
+// running processes
+
+function processes(callback) {
+
+  let parsedhead = [];
+
+  function parseHead(head, rights) {
+    let space = (rights > 0);
+    let count = 1;
+    let from = 0;
+    let to = 0;
+    let result = [];
+    for (let i = 0; i < head.length; i++) {
+      if (count <= rights) {
+        if (head[i] === ' ' && !space) {
+          to = i - 1;
+          result.push({
+            from: from,
+            to: to + 1,
+            cap: head.substring(from, to + 1)
+          });
+          from = to + 2;
+          count++;
+        }
+        space = head[i] === ' ';
+      } else {
+        if (head[i] !== ' ' && space) {
+          to = i - 1;
+          if (from < to) {
+            result.push({
+              from: from,
+              to: to,
+              cap: head.substring(from, to)
+            });
+          }
+          from = to + 1;
+          count++;
+        }
+        space = head[i] === ' ';
+      }
+    }
+    to = 1000;
+    result.push({
+      from: from,
+      to: to,
+      cap: head.substring(from, to)
+    });
+    return result;
+
+  }
+
+  function getName(command) {
+    command = command || '';
+    let result = command.split(' ')[0];
+    if (result.substr(-1) === ':') {
+      result = result.substr(0, result.length - 1);
+    }
+    if (result.substr(0, 1) !== '[') {
+      let parts = result.split('/');
+      result = parts[parts.length - 1];
+    }
+    return result;
+  }
+
+  function parseLine(line) {
+    let offset = 0;
+    let offset2 = 0;
+
+    function checkColumn(i) {
+      offset = offset2;
+      offset2 = line.substring(parsedhead[i].to + offset, 1000).indexOf(' ');
+    }
+
+    checkColumn(0);
+    let pid = parseInt(line.substring(parsedhead[0].from + offset, parsedhead[0].to + offset2));
+    checkColumn(1);
+    let ppid = parseInt(line.substring(parsedhead[1].from + offset, parsedhead[1].to + offset2));
+    checkColumn(2);
+    let pcpu = parseFloat(line.substring(parsedhead[2].from + offset, parsedhead[2].to + offset2).replace(/,/g, '.'));
+    checkColumn(3);
+    let pmem = parseFloat(line.substring(parsedhead[3].from + offset, parsedhead[3].to + offset2).replace(/,/g, '.'));
+    checkColumn(4);
+    let priority = parseInt(line.substring(parsedhead[4].from + offset, parsedhead[4].to + offset2));
+    checkColumn(5);
+    let vsz = parseInt(line.substring(parsedhead[5].from + offset, parsedhead[5].to + offset2));
+    checkColumn(6);
+    let rss = parseInt(line.substring(parsedhead[6].from + offset, parsedhead[6].to + offset2));
+    checkColumn(7);
+    let nice = parseInt(line.substring(parsedhead[7].from + offset, parsedhead[7].to + offset2)) || 0;
+    checkColumn(8);
+    let started = line.substring(parsedhead[8].from + offset, parsedhead[8].to + offset2).trim();
+    checkColumn(9);
+    let state = line.substring(parsedhead[9].from + offset, parsedhead[9].to + offset2).trim();
+    state = (state[0] === 'R' ? 'running' : (state[0] === 'S' ? 'sleeping' : (state[0] === 'T' ? 'stopped' : (state[0] === 'W' ? 'paging' : (state[0] === 'X' ? 'dead' : (state[0] === 'Z' ? 'zombie' : ((state[0] === 'D' || state[0] === 'U') ? 'blocked' : 'unknown')))))));
+    checkColumn(10);
+    let tty = line.substring(parsedhead[10].from + offset, parsedhead[10].to + offset2).trim();
+    if (tty === '?' || tty === '??') tty = '';
+    checkColumn(11);
+    let user = line.substring(parsedhead[11].from + offset, parsedhead[11].to + offset2).trim();
+    checkColumn(12);
+    let command = line.substring(parsedhead[12].from + offset, parsedhead[12].to + offset2).trim().replace(/\[/g, '').replace(/]/g, '');
+
+    return ({
+      pid: pid,
+      parentPid: ppid,
+      name: _linux ? getName(command) : command,
+      pcpu: pcpu,
+      pcpuu: 0,
+      pcpus: 0,
+      pmem: pmem,
+      priority: priority,
+      mem_vsz: vsz,
+      mem_rss: rss,
+      nice: nice,
+      started: started,
+      state: state,
+      tty: tty,
+      user: user,
+      command: command
+    });
+  }
+
+  function parseProcesses(lines) {
+    let result = [];
+    if (lines.length > 1) {
+      let head = lines[0];
+      parsedhead = parseHead(head, 8);
+      lines.shift();
+      lines.forEach(function (line) {
+        if (line.trim() !== '') {
+          result.push(parseLine(line));
+        }
+      });
+    }
+    return result;
+  }
+  function parseProcesses2(lines) {
+
+    function formatDateTime(time) {
+      const month = ('0' + (time.getMonth() + 1).toString()).substr(-2);
+      const year = time.getFullYear().toString();
+      const day = ('0' + time.getDay().toString()).substr(-2);
+      const hours = time.getHours().toString();
+      const mins = time.getMinutes().toString();
+      const secs = ('0' + time.getSeconds().toString()).substr(-2);
+
+      return (year + '-' + month + '-' + day + ' ' + hours + ':' + mins + ':' + secs);
+    }
+
+    let result = [];
+    lines.forEach(function (line) {
+      if (line.trim() !== '') {
+        line = line.trim().replace(/ +/g, ' ').replace(/,+/g, '.');
+        const parts = line.split(' ');
+        const command = parts.slice(9).join(' ');
+        const pmem = parseFloat((1.0 * parseInt(parts[3]) * 1024 / os.totalmem()).toFixed(1));
+        const elapsed_parts = parts[5].split(':');
+        const started = formatDateTime(new Date(Date.now() - (elapsed_parts.length > 1 ? (elapsed_parts[0] * 60 + elapsed_parts[1]) * 1000 : elapsed_parts[0] * 1000)));
+
+        result.push({
+          pid: parseInt(parts[0]),
+          parentPid: parseInt(parts[1]),
+          name: getName(command),
+          pcpu: 0,
+          pcpuu: 0,
+          pcpus: 0,
+          pmem: pmem,
+          priority: 0,
+          mem_vsz: parseInt(parts[2]),
+          mem_rss: parseInt(parts[3]),
+          nice: parseInt(parts[4]),
+          started: started,
+          state: (parts[6] === 'R' ? 'running' : (parts[6] === 'S' ? 'sleeping' : (parts[6] === 'T' ? 'stopped' : (parts[6] === 'W' ? 'paging' : (parts[6] === 'X' ? 'dead' : (parts[6] === 'Z' ? 'zombie' : ((parts[6] === 'D' || parts[6] === 'U') ? 'blocked' : 'unknown'))))))),
+          tty: parts[7],
+          user: parts[8],
+          command: command
+        });
+      }
+    });
+    return result;
+  }
+
+  function parseProcStat(line) {
+    let parts = line.replace(/ +/g, ' ').split(' ');
+    let user = (parts.length >= 2 ? parseInt(parts[1]) : 0);
+    let nice = (parts.length >= 3 ? parseInt(parts[2]) : 0);
+    let system = (parts.length >= 4 ? parseInt(parts[3]) : 0);
+    let idle = (parts.length >= 5 ? parseInt(parts[4]) : 0);
+    let iowait = (parts.length >= 6 ? parseInt(parts[5]) : 0);
+    let irq = (parts.length >= 7 ? parseInt(parts[6]) : 0);
+    let softirq = (parts.length >= 8 ? parseInt(parts[7]) : 0);
+    let steal = (parts.length >= 9 ? parseInt(parts[8]) : 0);
+    let guest = (parts.length >= 10 ? parseInt(parts[9]) : 0);
+    let guest_nice = (parts.length >= 11 ? parseInt(parts[10]) : 0);
+    return user + nice + system + idle + iowait + irq + softirq + steal + guest + guest_nice;
+  }
+
+  function parseProcPidStat(line, all) {
+    let statparts = line.replace(/ +/g, ' ').split(')');
+    if (statparts.length >= 2) {
+      let parts = statparts[1].split(' ');
+      if (parts.length >= 16) {
+        let pid = parseInt(statparts[0].split(' ')[0]);
+        let utime = parseInt(parts[12]);
+        let stime = parseInt(parts[13]);
+        let cutime = parseInt(parts[14]);
+        let cstime = parseInt(parts[15]);
+
+        // calc
+        let pcpuu = 0;
+        let pcpus = 0;
+        if (_process_cpu.all > 0 && _process_cpu.list[pid]) {
+          pcpuu = (utime + cutime - _process_cpu.list[pid].utime - _process_cpu.list[pid].cutime) / (all - _process_cpu.all) * 100; // user
+          pcpus = (stime + cstime - _process_cpu.list[pid].stime - _process_cpu.list[pid].cstime) / (all - _process_cpu.all) * 100; // system
+        } else {
+          pcpuu = (utime + cutime) / (all) * 100; // user
+          pcpus = (stime + cstime) / (all) * 100; // system
+        }
+        return {
+          pid: pid,
+          utime: utime,
+          stime: stime,
+          cutime: cutime,
+          cstime: cstime,
+          pcpuu: pcpuu,
+          pcpus: pcpus
+        };
+      } else {
+        return {
+          pid: 0,
+          utime: 0,
+          stime: 0,
+          cutime: 0,
+          cstime: 0,
+          pcpuu: 0,
+          pcpus: 0
+        };
+      }
+    } else {
+      return {
+        pid: 0,
+        utime: 0,
+        stime: 0,
+        cutime: 0,
+        cstime: 0,
+        pcpuu: 0,
+        pcpus: 0
+      };
+    }
+  }
+
+  function calcProcPidStat(procStat, all) {
+    // calc
+    let pcpuu = 0;
+    let pcpus = 0;
+    if (_process_cpu.all > 0 && _process_cpu.list[procStat.pid]) {
+      pcpuu = (procStat.utime - _process_cpu.list[procStat.pid].utime) / (all - _process_cpu.all) * 100; // user
+      pcpus = (procStat.stime - _process_cpu.list[procStat.pid].stime) / (all - _process_cpu.all) * 100; // system
+    } else {
+      pcpuu = (procStat.utime) / (all) * 100; // user
+      pcpus = (procStat.stime) / (all) * 100; // system
+    }
+    return {
+      pid: procStat.pid,
+      utime: procStat.utime,
+      stime: procStat.stime,
+      pcpuu: pcpuu,
+      pcpus: pcpus
+    };
+  }
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      let result = {
+        all: 0,
+        running: 0,
+        blocked: 0,
+        sleeping: 0,
+        unknown: 0,
+        list: []
+      };
+
+      let cmd = '';
+
+      if ((_process_cpu.ms && Date.now() - _process_cpu.ms >= 500) || _process_cpu.ms === 0) {
+        if (_linux || _freebsd || _openbsd || _darwin || _sunos) {
+          if (_linux) cmd = 'ps -axo pid:10,ppid:10,pcpu:6,pmem:6,pri:5,vsz:10,rss:10,ni:5,start:20,state:20,tty:20,user:20,command';
+          if (_freebsd || _openbsd) cmd = 'ps -axo pid,ppid,pcpu,pmem,pri,vsz,rss,ni,start,state,tty,user,command';
+          if (_darwin) cmd = 'ps -acxo pid,ppid,pcpu,pmem,pri,vsz,rss,nice,start,state,tty,user,command -r';
+          if (_sunos) cmd = 'ps -Ao pid,ppid,pcpu,pmem,pri,vsz,rss,nice,stime,s,tty,user,comm';
+          exec(cmd, { maxBuffer: 1024 * 2000 }, function (error, stdout) {
+            if (!error) {
+              result.list = parseProcesses(stdout.toString().split('\n'));
+              result.all = result.list.length;
+              result.running = result.list.filter(function (e) {
+                return e.state === 'running';
+              }).length;
+              result.blocked = result.list.filter(function (e) {
+                return e.state === 'blocked';
+              }).length;
+              result.sleeping = result.list.filter(function (e) {
+                return e.state === 'sleeping';
+              }).length;
+
+              if (_linux) {
+                // calc process_cpu - ps is not accurate in linux!
+                cmd = 'cat /proc/stat | grep "cpu "';
+                for (let i = 0; i < result.list.length; i++) {
+                  cmd += (';cat /proc/' + result.list[i].pid + '/stat');
+                }
+                exec(cmd, { maxBuffer: 1024 * 2000 }, function (error, stdout) {
+                  let curr_processes = stdout.toString().split('\n');
+
+                  // first line (all - /proc/stat)
+                  let all = parseProcStat(curr_processes.shift());
+
+                  // process
+                  let list_new = {};
+                  let resultProcess = {};
+                  for (let i = 0; i < curr_processes.length; i++) {
+                    resultProcess = parseProcPidStat(curr_processes[i], all);
+
+                    if (resultProcess.pid) {
+
+                      // store pcpu in outer array
+                      let listPos = result.list.map(function (e) { return e.pid; }).indexOf(resultProcess.pid);
+                      if (listPos >= 0) {
+                        result.list[listPos].pcpu = resultProcess.pcpuu + resultProcess.pcpus;
+                        result.list[listPos].pcpuu = resultProcess.pcpuu;
+                        result.list[listPos].pcpus = resultProcess.pcpus;
+                      }
+
+                      // save new values
+                      list_new[resultProcess.pid] = {
+                        pcpuu: resultProcess.pcpuu,
+                        pcpus: resultProcess.pcpus,
+                        utime: resultProcess.utime,
+                        stime: resultProcess.stime,
+                        cutime: resultProcess.cutime,
+                        cstime: resultProcess.cstime
+                      };
+                    }
+                  }
+
+                  // store old values
+                  _process_cpu.all = all;
+                  _process_cpu.list = list_new;
+                  _process_cpu.ms = Date.now() - _process_cpu.ms;
+                  _process_cpu.result = result;
+                  if (callback) { callback(result); }
+                  resolve(result);
+                });
+              } else {
+                if (callback) { callback(result); }
+                resolve(result);
+              }
+            } else {
+              cmd = 'ps -o pid,ppid,vsz,rss,nice,etime,stat,tty,user,comm';
+              if (_sunos) {
+                cmd = 'ps -o pid,ppid,vsz,rss,nice,etime,s,tty,user,comm';
+              }
+              exec(cmd, { maxBuffer: 1024 * 2000 }, function (error, stdout) {
+                if (!error) {
+                  let lines = stdout.toString().split('\n');
+                  lines.shift();
+
+                  result.list = parseProcesses2(lines);
+                  result.all = result.list.length;
+                  result.running = result.list.filter(function (e) {
+                    return e.state === 'running';
+                  }).length;
+                  result.blocked = result.list.filter(function (e) {
+                    return e.state === 'blocked';
+                  }).length;
+                  result.sleeping = result.list.filter(function (e) {
+                    return e.state === 'sleeping';
+                  }).length;
+                  if (callback) { callback(result); }
+                  resolve(result);
+                } else {
+                  if (callback) { callback(result); }
+                  resolve(result);
+                }
+              });
+            }
+          });
+        }
+        if (_windows) {
+          try {
+            exec(util.getWmic() + ' process get /value', { maxBuffer: 1024 * 2000, windowsHide: true }, function (error, stdout) {
+              if (!error) {
+                let processSections = stdout.split(/\n\s*\n/);
+                let procs = [];
+                let procStats = [];
+                let list_new = {};
+                let allcpuu = 0;
+                let allcpus = 0;
+                for (let i = 0; i < processSections.length; i++) {
+                  if (processSections[i].trim() !== '') {
+                    let lines = processSections[i].trim().split('\r\n');
+                    let pid = parseInt(util.getValue(lines, 'ProcessId', '=', true), 10);
+                    let parentPid = parseInt(util.getValue(lines, 'ParentProcessId', '=', true), 10);
+                    let statusValue = util.getValue(lines, 'ExecutionState', '=');
+                    let name = util.getValue(lines, 'Caption', '=', true);
+                    let commandLine = util.getValue(lines, 'CommandLine', '=', true);
+                    let utime = parseInt(util.getValue(lines, 'UserModeTime', '=', true), 10);
+                    let stime = parseInt(util.getValue(lines, 'KernelModeTime', '=', true), 10);
+                    let mem = parseInt(util.getValue(lines, 'WorkingSetSize', '=', true), 10);
+                    allcpuu = allcpuu + utime;
+                    allcpus = allcpus + stime;
+                    result.all++;
+                    if (!statusValue) { result.unknown++; }
+                    if (statusValue === '3') { result.running++; }
+                    if (statusValue === '4' || statusValue === '5') { result.blocked++; }
+
+                    procStats.push({
+                      pid: pid,
+                      utime: utime,
+                      stime: stime,
+                      pcpu: 0,
+                      pcpuu: 0,
+                      pcpus: 0,
+                    });
+                    procs.push({
+                      pid: pid,
+                      parentPid: parentPid,
+                      name: name,
+                      pcpu: 0,
+                      pcpuu: 0,
+                      pcpus: 0,
+                      pmem: mem / os.totalmem() * 100,
+                      priority: parseInt(util.getValue(lines, 'Priority', '=', true), 10),
+                      mem_vsz: parseInt(util.getValue(lines, 'PageFileUsage', '=', true), 10),
+                      mem_rss: Math.floor(parseInt(util.getValue(lines, 'WorkingSetSize', '=', true), 10) / 1024),
+                      nice: 0,
+                      started: parseTimeWin(util.getValue(lines, 'CreationDate', '=', true)),
+                      state: (!statusValue ? _winStatusValues[0] : _winStatusValues[statusValue]),
+                      tty: '',
+                      user: '',
+                      command: commandLine || name
+                    });
+                  }
+                }
+                result.sleeping = result.all - result.running - result.blocked - result.unknown;
+                result.list = procs;
+                for (let i = 0; i < procStats.length; i++) {
+                  let resultProcess = calcProcPidStat(procStats[i], allcpuu + allcpus);
+
+                  // store pcpu in outer array
+                  let listPos = result.list.map(function (e) { return e.pid; }).indexOf(resultProcess.pid);
+                  if (listPos >= 0) {
+                    result.list[listPos].pcpu = resultProcess.pcpuu + resultProcess.pcpus;
+                    result.list[listPos].pcpuu = resultProcess.pcpuu;
+                    result.list[listPos].pcpus = resultProcess.pcpus;
+                  }
+
+                  // save new values
+                  list_new[resultProcess.pid] = {
+                    pcpuu: resultProcess.pcpuu,
+                    pcpus: resultProcess.pcpus,
+                    utime: resultProcess.utime,
+                    stime: resultProcess.stime
+                  };
+                }
+                // store old values
+                _process_cpu.all = allcpuu + allcpus;
+                _process_cpu.list = list_new;
+                _process_cpu.ms = Date.now() - _process_cpu.ms;
+                _process_cpu.result = result;
+              }
+              if (callback) {
+                callback(result);
+              }
+              resolve(result);
+            });
+          } catch (e) {
+            if (callback) { callback(result); }
+            resolve(result);
+          }
+        }
+      } else {
+        if (callback) { callback(_process_cpu.result); }
+        resolve(_process_cpu.result);
+      }
+    });
+  });
+}
+
+exports.processes = processes;
+
+// --------------------------
+// PS - process load
+// get detailed information about a certain process
+// (PID, CPU-Usage %, Mem-Usage %)
+
+function processLoad(proc, callback) {
+
+  // fallback - if only callback is given
+  if (util.isFunction(proc) && !callback) {
+    callback = proc;
+    proc = '';
+  }
+
+  return new Promise((resolve, reject) => {
+    process.nextTick(() => {
+      if (_windows) {
+        let error = new Error(NOT_SUPPORTED);
+        if (callback) { callback(NOT_SUPPORTED); }
+        reject(error);
+      }
+
+      let result = {
+        'proc': proc,
+        'pid': -1,
+        'cpu': 0,
+        'mem': 0
+      };
+
+      if (proc) {
+        exec('ps -axo pid,pcpu,pmem,comm | grep ' + proc + ' | grep -v grep', { maxBuffer: 1024 * 2000 }, function (error, stdout) {
+          if (!error) {
+            let lines = stdout.toString().split('\n');
+
+            let pid = 0;
+            let cpu = 0;
+            let mem = 0;
+
+            lines.forEach(function (line) {
+              let data = line.replace(/ +/g, ' ').split(' ');
+              if (data.length > 3) {
+                pid = (!pid ? parseInt(data[0]) : 0);
+                cpu = cpu + parseFloat(data[1].replace(',', '.'));
+                mem = mem + parseFloat(data[2].replace(',', '.'));
+              }
+            });
+            // TODO: calc process_cpu - ps is not accurate in linux!
+
+            result = {
+              'proc': proc,
+              'pid': pid,
+              'cpu': parseFloat((cpu / lines.length).toFixed(2)),
+              'mem': parseFloat((mem / lines.length).toFixed(2))
+            };
+          }
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      } else {
+        if (callback) { callback(result); }
+        resolve(result);
+      }
+    });
+  });
+}
+
+exports.processLoad = processLoad;
+
+
+
+
+
+/***/ }),
+
+/***/ "./node_modules/systeminformation/lib/system.js":
+/*!******************************************************!*\
+  !*** ./node_modules/systeminformation/lib/system.js ***!
+  \******************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+// ==================================================================================
+// system.js
+// ----------------------------------------------------------------------------------
+// Description:   System Information - library
+//                for Node.js
+// Copyright:     (c) 2014 - 2018
+// Author:        Sebastian Hildebrandt
+// ----------------------------------------------------------------------------------
+// License:       MIT
+// ==================================================================================
+// 2. System (Hardware, BIOS, Base Board)
+// ----------------------------------------------------------------------------------
+
+const exec = __webpack_require__(/*! child_process */ "child_process").exec;
+const fs = __webpack_require__(/*! fs */ "fs");
+const util = __webpack_require__(/*! ./util */ "./node_modules/systeminformation/lib/util.js");
+
+let _platform = process.platform;
+
+const _linux = (_platform === 'linux');
+const _darwin = (_platform === 'darwin');
+const _windows = (_platform === 'win32');
+const _freebsd = (_platform === 'freebsd');
+const _openbsd = (_platform === 'openbsd');
+const _sunos = (_platform === 'sunos');
+
+const opts = {
+  windowsHide: true
+};
+
+function system(callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+
+      let result = {
+        manufacturer: '',
+        model: 'Computer',
+        version: '',
+        serial: '-',
+        uuid: '-',
+        sku: '-',
+      };
+
+      if (_linux || _freebsd || _openbsd) {
+        exec('dmidecode -t system', function (error, stdout) {
+          if (!error) {
+            let lines = stdout.toString().split('\n');
+            result.manufacturer = util.getValue(lines, 'manufacturer');
+            result.model = util.getValue(lines, 'product name');
+            result.version = util.getValue(lines, 'version');
+            result.serial = util.getValue(lines, 'serial number');
+            result.uuid = util.getValue(lines, 'uuid');
+            result.sku = util.getValue(lines, 'sku number');
+            if (result.serial.toLowerCase().indexOf('o.e.m.') !== -1) result.serial = '-';
+            if (result.manufacturer.toLowerCase().indexOf('o.e.m.') !== -1) result.manufacturer = '';
+            if (result.model.toLowerCase().indexOf('o.e.m.') !== -1) result.model = 'Computer';
+            if (result.version.toLowerCase().indexOf('o.e.m.') !== -1) result.version = '-';
+            if (result.sku.toLowerCase().indexOf('o.e.m.') !== -1) result.sku = '-';
+          }
+          // detect docker
+          if (fs.existsSync('/.dockerenv') || fs.existsSync('/.dockerinit')) {
+            result.model = 'Docker Container';
+          }
+          if (result.manufacturer === '' && result.model === 'Computer' && result.version === '') { // still default values
+            exec('dmesg | grep -i virtual | grep -iE "vmware|qemu|kvm|xen"', function (error, stdout) {
+              // detect virtual machines
+              if (!error) {
+                let lines = stdout.toString().split('\n');
+                if (lines.length > 0) result.model = 'Virtual machine';
+              }
+
+              if (result.manufacturer === '' && result.model === 'Computer' && result.version === '-') {
+                // Check Raspberry Pi
+                exec('cat /proc/cpuinfo', function (error, stdout) {
+                  if (!error) {
+                    let lines = stdout.toString().split('\n');
+                    result.model = util.getValue(lines, 'hardware', ':', true).toUpperCase();
+                    result.version = util.getValue(lines, 'revision', ':', true).toLowerCase();
+                    result.serial = util.getValue(lines, 'serial', ':', true);
+
+                    // reference values: https://elinux.org/RPi_HardwareHistory
+                    if (result.model === 'BCM2835' || result.model === 'BCM2708' || result.model === 'BCM2709' || result.model === 'BCM2835' || result.model === 'BCM2837') {
+
+                      // Pi 3
+                      if (['a02082', 'a22082', 'a32082'].indexOf(result.version) >= 0) {
+                        result.model = result.model + ' - Pi 3 Model B';
+                        result.version = result.version + ' - Rev. 1.2';
+                      }
+                      if (['a020d3'].indexOf(result.version) >= 0) {
+                        result.model = result.model + ' - Pi 3 Model B';
+                        result.version = result.version + ' - Rev. 1.3';
+                      }
+                      // Pi 2 Model B
+                      if (['a01040'].indexOf(result.version) >= 0) {
+                        result.model = result.model + ' - Pi 2 Model B';
+                        result.version = result.version + ' - Rev. 1.0';
+                      }
+                      if (['a01041', 'a21041'].indexOf(result.version) >= 0) {
+                        result.model = result.model + ' - Pi 2 Model B';
+                        result.version = result.version + ' - Rev. 1.1';
+                      }
+                      if (['a22042'].indexOf(result.version) >= 0) {
+                        result.model = result.model + ' - Pi 2 Model B';
+                        result.version = result.version + ' - Rev. 1.2';
+                      }
+
+                      // Pi Zero
+                      if (['900092'].indexOf(result.version) >= 0) {
+                        result.model = result.model + ' - Pi Zero';
+                        result.version = result.version + ' - Rev 1.2';
+                      }
+                      if (['900093', '920093'].indexOf(result.version) >= 0) {
+                        result.model = result.model + ' - Pi Zero';
+                        result.version = result.version + ' - Rev 1.3';
+                      }
+                      if (['9000c1'].indexOf(result.version) >= 0) {
+                        result.model = result.model + ' - Pi Zero W';
+                        result.version = result.version + ' - Rev 1.1';
+                      }
+
+                      // A, B, A+ B+
+                      if (['0002', '0003'].indexOf(result.version) >= 0) {
+                        result.model = result.model + ' - Pi Model B';
+                        result.version = result.version + ' - Rev 1.0';
+                      }
+                      if (['0004', '0005', '0006', '000d', '000e', '000f'].indexOf(result.version) >= 0) {
+                        result.model = result.model + ' - Pi Model B';
+                        result.version = result.version + ' - Rev 2.0';
+                      }
+                      if (['0007', '0008', '0009'].indexOf(result.version) >= 0) {
+                        result.model = result.model + ' - Pi Model A';
+                        result.version = result.version + ' - Rev 2.0';
+                      }
+                      if (['0010'].indexOf(result.version) >= 0) {
+                        result.model = result.model + ' - Pi Model B+';
+                        result.version = result.version + ' - Rev 1.0';
+                      }
+                      if (['0012'].indexOf(result.version) >= 0) {
+                        result.model = result.model + ' - Pi Model A+';
+                        result.version = result.version + ' - Rev 1.0';
+                      }
+                      if (['0013'].indexOf(result.version) >= 0) {
+                        result.model = result.model + ' - Pi Model B+';
+                        result.version = result.version + ' - Rev 1.2';
+                      }
+                      if (['0015'].indexOf(result.version) >= 0) {
+                        result.model = result.model + ' - Pi Model A+';
+                        result.version = result.version + ' - Rev 1.1';
+                      }
+                      if (result.model.indexOf('Pi') !== -1 && result.version) {  // Pi, Pi Zero
+                        result.manufacturer = 'Raspberry Pi Foundation';
+                      }
+                    }
+                  }
+                  if (callback) { callback(result); }
+                  resolve(result);
+                });
+              } else {
+                if (callback) { callback(result); }
+                resolve(result);
+              }
+            });
+          } else {
+            if (callback) { callback(result); }
+            resolve(result);
+          }
+        });
+      }
+      if (_darwin) {
+        exec('ioreg -c IOPlatformExpertDevice -d 2', function (error, stdout) {
+          if (!error) {
+            let lines = stdout.toString().replace(/[<>"]/g, '').split('\n');
+            result.manufacturer = util.getValue(lines, 'manufacturer', '=', true);
+            result.model = util.getValue(lines, 'model', '=', true);
+            result.version = util.getValue(lines, 'version', '=', true);
+            result.serial = util.getValue(lines, 'ioplatformserialnumber', '=', true);
+            result.uuid = util.getValue(lines, 'ioplatformuuid', '=', true);
+            result.sku = util.getValue(lines, 'board-id', '=', true);
+          }
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      }
+      if (_sunos) {
+        if (callback) { callback(result); }
+        resolve(result);
+      }
+      if (_windows) {
+        try {
+          exec(util.getWmic() + ' csproduct get /value', opts, function (error, stdout) {
+            if (!error) {
+              // let lines = stdout.split('\r\n').filter(line => line.trim() !== '').filter((line, idx) => idx > 0)[0].trim().split(/\s\s+/);
+              let lines = stdout.split('\r\n');
+              result.manufacturer = util.getValue(lines, 'vendor', '=');
+              result.model = util.getValue(lines, 'name', '=');
+              result.version = util.getValue(lines, 'version', '=');
+              result.serial = util.getValue(lines, 'identifyingnumber', '=');
+              result.uuid = util.getValue(lines, 'uuid', '=');
+              exec(util.getWmic() + ' /namespace:\\\\root\\wmi path MS_SystemInformation get /value', opts, function (error, stdout) {
+                if (!error) {
+                  let lines = stdout.split('\r\n');
+                  result.sku = util.getValue(lines, 'systemsku', '=');
+                }
+                if (callback) { callback(result); }
+                resolve(result);
+              });
+            }
+            if (callback) { callback(result); }
+            resolve(result);
+          });  
+        } catch (e) {
+          if (callback) { callback(result); }
+          resolve(result);    
+        }
+      }
+    });
+  });
+}
+
+exports.system = system;
+
+function bios(callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+
+      let result = {
+        vendor: '',
+        version: '',
+        releaseDate: '',
+        revision: '',
+      };
+      let cmd = '';
+      if (_linux || _freebsd || _openbsd) {
+        if (process.arch === 'arm') {
+          cmd = 'cat /proc/cpuinfo | grep Serial';
+
+        } else {
+          cmd = 'dmidecode --type 0';
+        }
+        exec(cmd, function (error, stdout) {
+          if (!error) {
+            let lines = stdout.toString().split('\n');
+            result.vendor = util.getValue(lines, 'Vendor');
+            result.version = util.getValue(lines, 'Version');
+            const datetime = util.getValue(lines, 'Release Date');
+            result.releaseDate = util.parseDateTime(datetime).date;
+            result.revision = util.getValue(lines, 'BIOS Revision');
+          }
+
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      }
+      if (_darwin) {
+        result.vendor = 'Apple Inc.';
+        if (callback) { callback(result); }
+        resolve(result);
+      }
+      if (_sunos) {
+        result.vendor = 'Sun Microsystems';
+        if (callback) { callback(result); }
+        resolve(result);
+      }
+      if (_windows) {
+        // TODO: check BIOS windows
+        try {
+          exec(util.getWmic() + ' bios get /value', opts, function (error, stdout) {
+            if (!error) {
+              let lines = stdout.toString().split('\r\n');
+              const description = util.getValue(lines, 'description', '=');
+              if (description.indexOf(' Version ') !== -1) {
+                // ... Phoenix ROM BIOS PLUS Version 1.10 A04
+                result.vendor = description.split(' Version ')[0].trim();
+                result.version = description.split(' Version ')[1].trim();
+              } else if (description.indexOf(' Ver: ') !== -1) {
+                // ... BIOS Date: 06/27/16 17:50:16 Ver: 1.4.5
+                result.vendor = util.getValue(lines, 'manufacturer', '=');
+                result.version = description.split(' Ver: ')[1].trim();
+              } else {
+                result.vendor = util.getValue(lines, 'manufacturer', '=');
+                result.version = util.getValue(lines, 'version', '=');
+              }
+              result.releaseDate = util.getValue(lines, 'releasedate', '=');
+              if (result.releaseDate.length >= 10) {
+                result.releaseDate = result.releaseDate.substr(0, 4) + '-' + result.releaseDate.substr(4, 2) + '-' + result.releaseDate.substr(6, 2);
+              }
+              result.revision = util.getValue(lines, 'buildnumber', '=');
+            }
+  
+            if (callback) { callback(result); }
+            resolve(result);
+          });  
+        } catch (e) {
+          if (callback) { callback(result); }
+          resolve(result);    
+        }
+      }
+    });
+  });
+}
+
+exports.bios = bios;
+
+function baseboard(callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+
+      let result = {
+        manufacturer: '',
+        model: '',
+        version: '',
+        serial: '-',
+        assetTag: '-',
+      };
+      let cmd = '';
+      if (_linux || _freebsd || _openbsd) {
+        if (process.arch === 'arm') {
+          cmd = 'cat /proc/cpuinfo | grep Serial';
+          // 'BCM2709', 'BCM2835', 'BCM2708' -->
+        } else {
+          cmd = 'dmidecode -t 2';
+        }
+        exec(cmd, function (error, stdout) {
+          if (!error) {
+            let lines = stdout.toString().split('\n');
+            result.manufacturer = util.getValue(lines, 'Manufacturer');
+            result.model = util.getValue(lines, 'Product Name');
+            result.version = util.getValue(lines, 'Version');
+            result.serial = util.getValue(lines, 'Serial Number');
+            result.assetTag = util.getValue(lines, 'Asset Tag');
+            if (result.serial.toLowerCase().indexOf('o.e.m.') !== -1) result.serial = '-';
+            if (result.assetTag.toLowerCase().indexOf('o.e.m.') !== -1) result.assetTag = '-';
+          }
+
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      }
+      if (_darwin) {
+        exec('ioreg -c IOPlatformExpertDevice -d 2', function (error, stdout) {
+          if (!error) {
+            let lines = stdout.toString().replace(/[<>"]/g, '').split('\n');
+            result.manufacturer = util.getValue(lines, 'manufacturer', '=', true);
+            result.model = util.getValue(lines, 'model', '=', true);
+            result.version = util.getValue(lines, 'version', '=', true);
+            result.serial = util.getValue(lines, 'ioplatformserialnumber', '=', true);
+            result.assetTag = util.getValue(lines, 'board-id', '=', true);
+          }
+
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      }
+      if (_sunos) {
+        if (callback) { callback(result); }
+        resolve(result);
+      }
+      if (_windows) {
+        try {
+          exec(util.getWmic() + ' baseboard get /value', opts, function (error, stdout) {
+            if (!error) {
+              let lines = stdout.toString().split('\r\n');
+  
+              result.manufacturer = util.getValue(lines, 'manufacturer', '=');
+              result.model = util.getValue(lines, 'model', '=');
+              if (!result.model) {
+                result.model = util.getValue(lines, 'product', '=');
+              }
+              result.version = util.getValue(lines, 'version', '=');
+              result.serial = util.getValue(lines, 'serialnumber', '=');
+              result.assetTag = util.getValue(lines, 'partnumber', '=');
+              if (!result.assetTag) {
+                result.assetTag = util.getValue(lines, 'sku', '=');
+              }
+            }
+  
+            if (callback) { callback(result); }
+            resolve(result);
+          });  
+        } catch (e) {
+          if (callback) { callback(result); }
+          resolve(result);    
+        }
+      }
+    });
+  });
+}
+
+exports.baseboard = baseboard;
+
+
+
+
+/***/ }),
+
+/***/ "./node_modules/systeminformation/lib/users.js":
+/*!*****************************************************!*\
+  !*** ./node_modules/systeminformation/lib/users.js ***!
+  \*****************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+// ==================================================================================
+// users.js
+// ----------------------------------------------------------------------------------
+// Description:   System Information - library
+//                for Node.js
+// Copyright:     (c) 2014 - 2018
+// Author:        Sebastian Hildebrandt
+// ----------------------------------------------------------------------------------
+// License:       MIT
+// ==================================================================================
+// 11. Users/Sessions
+// ----------------------------------------------------------------------------------
+
+const exec = __webpack_require__(/*! child_process */ "child_process").exec;
+const util = __webpack_require__(/*! ./util */ "./node_modules/systeminformation/lib/util.js");
+
+let _platform = process.platform;
+
+const _linux = (_platform === 'linux');
+const _darwin = (_platform === 'darwin');
+const _windows = (_platform === 'win32');
+const _freebsd = (_platform === 'freebsd');
+const _openbsd = (_platform === 'openbsd');
+const _sunos = (_platform === 'sunos');
+
+const opts = {
+  windowsHide: true
+};
+
+// --------------------------
+// array of users online = sessions
+
+function parseUsersLinux(lines) {
+  let result = [];
+  let result_who = [];
+  let result_w = {};
+  let w_first = true;
+  let w_header = [];
+  let w_pos = [];
+  let who_line = {};
+
+  let is_whopart = true;
+  lines.forEach(function (line) {
+    if (line === '---') {
+      is_whopart = false;
+    } else {
+      let l = line.replace(/ +/g, ' ').split(' ');
+
+      // who part
+      if (is_whopart) {
+        result_who.push({
+          user: l[0],
+          tty: l[1],
+          date: l[2],
+          time: l[3],
+          ip: (l && l.length > 4) ? l[4].replace(/\(/g, '').replace(/\)/g, '') : ''
+        });
+      } else {
+        // w part
+        if (w_first) {    // header
+          w_header = l;
+          w_header.forEach(function (item) {
+            w_pos.push(line.indexOf(item));
+          });
+          w_first = false;
+        } else {
+          // split by w_pos
+          result_w.user = line.substring(w_pos[0], w_pos[1] - 1).trim();
+          result_w.tty = line.substring(w_pos[1], w_pos[2] - 1).trim();
+          result_w.ip = line.substring(w_pos[2], w_pos[3] - 1).replace(/\(/g, '').replace(/\)/g, '').trim();
+          result_w.command = line.substring(w_pos[7], 1000).trim();
+          // find corresponding 'who' line
+          who_line = result_who.filter(function (obj) {
+            return (obj.user.substring(0, 8).trim() === result_w.user && obj.tty === result_w.tty);
+          });
+          if (who_line.length === 1) {
+            result.push({
+              user: who_line[0].user,
+              tty: who_line[0].tty,
+              date: who_line[0].date,
+              time: who_line[0].time,
+              ip: who_line[0].ip,
+              command: result_w.command
+            });
+          }
+        }
+      }
+    }
+  });
+  return result;
+}
+
+function parseUsersDarwin(lines) {
+  let result = [];
+  let result_who = [];
+  let result_w = {};
+  let who_line = {};
+
+  let is_whopart = true;
+  lines.forEach(function (line) {
+    if (line === '---') {
+      is_whopart = false;
+    } else {
+      let l = line.replace(/ +/g, ' ').split(' ');
+
+      // who part
+      if (is_whopart) {
+        result_who.push({
+          user: l[0],
+          tty: l[1],
+          date: ('' + new Date().getFullYear()) + '-' + ('0' + ('JANFEBMARAPRMAYJUNJULAUGSEPOCTNOVDEC'.indexOf(l[2].toUpperCase()) / 3 + 1)).slice(-2) + '-' + ('0' + l[3]).slice(-2),
+          time: l[4],
+        });
+      } else {
+        // w part
+        // split by w_pos
+        result_w.user = l[0];
+        result_w.tty = l[1];
+        result_w.ip = (l[2] !== '-') ? l[2] : '';
+        result_w.command = l.slice(5, 1000).join(' ');
+        // find corresponding 'who' line
+        who_line = result_who.filter(function (obj) {
+          return (obj.user === result_w.user && (obj.tty.substring(3, 1000) === result_w.tty || obj.tty === result_w.tty));
+        });
+        if (who_line.length === 1) {
+          result.push({
+            user: who_line[0].user,
+            tty: who_line[0].tty,
+            date: who_line[0].date,
+            time: who_line[0].time,
+            ip: result_w.ip,
+            command: result_w.command
+          });
+        }
+      }
+    }
+  });
+  return result;
+}
+
+function parseUsersWin(lines) {
+
+  let result = [];
+  const header = lines[0];
+  const headerDelimiter = [];
+  if (header) {
+    const start = (header[0] === ' ') ? 1 : 0;
+    headerDelimiter.push(start-1);
+    let nextSpace = 0;
+    for (let i = start+1; i < header.length; i++) {
+      if (header[i] === ' ' && header[i-1] === ' ') {
+        nextSpace = i;
+      } else {
+        if (nextSpace) {
+          headerDelimiter.push(nextSpace);
+          nextSpace = 0;
+        }
+      }
+    }
+  }
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim()) {
+      const user = lines[i].substring(headerDelimiter[0]+1, headerDelimiter[1]).trim() || '';
+      const tty = lines[i].substring(headerDelimiter[1]+1, headerDelimiter[2] - 2).trim() || '';
+      const dateTime = util.parseDateTime(lines[i].substring(headerDelimiter[5]+1, 2000).trim()) || '';
+      result.push({
+        user: user,
+        tty: tty,
+        date: dateTime.date,
+        time: dateTime.time,
+        ip: '',
+        command: ''
+      });
+    }
+  }
+  return result;
+}
+
+function users(callback) {
+
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      let result = [];
+
+      // linux
+      if (_linux) {
+        exec('who --ips; echo "---"; w | tail -n +2', function (error, stdout) {
+          if (!error) {
+            // lines / split
+            let lines = stdout.toString().split('\n');
+            result = parseUsersLinux(lines);
+            if (result.length === 0) {
+              exec('who; echo "---"; w | tail -n +2', function (error, stdout) {
+                if (!error) {
+                  // lines / split
+                  lines = stdout.toString().split('\n');
+                  result = parseUsersLinux(lines);
+                }
+                if (callback) { callback(result); }
+                resolve(result);
+              });
+            } else {
+              if (callback) { callback(result); }
+              resolve(result);
+            }
+          } else {
+            if (callback) { callback(result); }
+            resolve(result);
+          }
+        });
+      }
+      if (_freebsd || _openbsd) {
+        exec('who; echo "---"; w -ih', function (error, stdout) {
+          if (!error) {
+            // lines / split
+            let lines = stdout.toString().split('\n');
+            result = parseUsersDarwin(lines);
+          }
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      }
+      if (_sunos) {
+        exec('who; echo "---"; w -h', function (error, stdout) {
+          if (!error) {
+            // lines / split
+            let lines = stdout.toString().split('\n');
+            result = parseUsersDarwin(lines);
+          }
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      }
+
+      if (_darwin) {
+        exec('who; echo "---"; w -ih', function (error, stdout) {
+          if (!error) {
+            // lines / split
+            let lines = stdout.toString().split('\n');
+            result = parseUsersDarwin(lines);
+          }
+          if (callback) { callback(result); }
+          resolve(result);
+        });
+      }
+      if (_windows) {
+        try {
+          exec('query user', opts, function (error, stdout) {
+            if (stdout) {
+              // lines / split
+              let lines = stdout.toString().split('\r\n');
+              result = parseUsersWin(lines);
+            }
+            if (callback) { callback(result); }
+            resolve(result);
+          });  
+        } catch (e) {
+          if (callback) { callback(result); }
+          resolve(result);    
+        }
+      }
+
+    });
+  });
+}
+
+exports.users = users;
+
+
+/***/ }),
+
+/***/ "./node_modules/systeminformation/lib/util.js":
+/*!****************************************************!*\
+  !*** ./node_modules/systeminformation/lib/util.js ***!
+  \****************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+// ==================================================================================
+// utils.js
+// ----------------------------------------------------------------------------------
+// Description:   System Information - library
+//                for Node.js
+// Copyright:     (c) 2014 - 2018
+// Author:        Sebastian Hildebrandt
+// ----------------------------------------------------------------------------------
+// License:       MIT
+// ==================================================================================
+// 0. helper functions
+// ----------------------------------------------------------------------------------
+
+const os = __webpack_require__(/*! os */ "os");
+const fs = __webpack_require__(/*! fs */ "fs");
+
+let _cores = 0;
+let wmic = '';
+
+function isFunction(functionToCheck) {
+  let getType = {};
+  return functionToCheck && getType.toString.call(functionToCheck) === '[object Function]';
+}
+
+function unique(obj) {
+  let uniques = [];
+  let stringify = {};
+  for (let i = 0; i < obj.length; i++) {
+    let keys = Object.keys(obj[i]);
+    keys.sort(function (a, b) { return a - b; });
+    let str = '';
+    for (let j = 0; j < keys.length; j++) {
+      str += JSON.stringify(keys[j]);
+      str += JSON.stringify(obj[i][keys[j]]);
+    }
+    if (!stringify.hasOwnProperty(str)) {
+      uniques.push(obj[i]);
+      stringify[str] = true;
+    }
+  }
+  return uniques;
+}
+
+function sortByKey(array, keys) {
+  return array.sort(function (a, b) {
+    let x = '';
+    let y = '';
+    keys.forEach(function (key) {
+      x = x + a[key]; y = y + b[key];
+    });
+    return ((x < y) ? -1 : ((x > y) ? 1 : 0));
+  });
+}
+
+function cores() {
+  if (_cores === 0) {
+    _cores = os.cpus().length;
+  }
+  return _cores;
+}
+
+function getValue(lines, property, separator, trimmed) {
+  separator = separator || ':';
+  property = property.toLowerCase();
+  trimmed = trimmed || false;
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i].toLowerCase().replace(/\t/g, '');
+    if (trimmed) {
+      line = line.trim();
+    }
+    if (line.startsWith(property)) {
+      const parts = lines[i].split(separator);
+      if (parts.length >= 2) {
+        parts.shift();
+        return parts.join(separator).trim();
+      } else {
+        return '';
+      }
+    }
+  }
+  return '';
+}
+
+function decodeEscapeSequence(str, base) {
+  base = base || 16;
+  return str.replace(/\\x([0-9A-Fa-f]{2})/g, function () {
+    return String.fromCharCode(parseInt(arguments[1], base));
+  });
+}
+
+function parseDateTime(dt) {
+  const result = {
+    date: '',
+    time: ''
+  };
+  const parts = dt.split(' ');
+  if (parts[0]) {
+    if (parts[0].indexOf('/') >= 0) {
+      // Dateformat: mm/dd/yyyy
+      const dtparts = parts[0].split('/');
+      if (dtparts.length === 3) {
+        result.date = dtparts[2] + '-' + ('0' + dtparts[0]).substr(-2) + '-' + ('0' + dtparts[1]).substr(-2);
+      }
+    }
+    if (parts[0].indexOf('.') >= 0) {
+      // Dateformat: dd.mm.yyyy
+      const dtparts = parts[0].split('.');
+      if (dtparts.length === 3) {
+        result.date = dtparts[2] + '-' + ('0' + dtparts[1]).substr(-2) + '-' + ('0' + dtparts[0]).substr(-2);
+      }
+    }
+    if (parts[0].indexOf('-') >= 0) {
+      // Dateformat: yyyy-mm-dd
+      const dtparts = parts[0].split('-');
+      if (dtparts.length === 3) {
+        result.date = dtparts[0] + '-' + ('0' + dtparts[1]).substr(-2) + '-' + ('0' + dtparts[2]).substr(-2);
+      }
+    }
+  }
+  if (parts[1]) {
+    result.time = parts[1];
+  }
+  return result;
+}
+
+function getWmic() {
+  if (os.type() === 'Windows_NT' && !wmic) {
+    if (fs.existsSync(process.env.WINDIR + '\\system32\\wbem\\wmic.exe')) {
+      wmic = process.env.WINDIR + '\\system32\\wbem\\wmic.exe';
+    } else wmic = 'wmic';
+  }
+  return wmic;
+}
+
+function noop() { }
+
+exports.isFunction = isFunction;
+exports.unique = unique;
+exports.sortByKey = sortByKey;
+exports.cores = cores;
+exports.getValue = getValue;
+exports.decodeEscapeSequence = decodeEscapeSequence;
+exports.parseDateTime = parseDateTime;
+exports.getWmic = getWmic;
+exports.noop = noop;
+
+
+/***/ }),
+
+/***/ "./node_modules/systeminformation/package.json":
+/*!*****************************************************!*\
+  !*** ./node_modules/systeminformation/package.json ***!
+  \*****************************************************/
+/*! exports provided: _from, _id, _inBundle, _integrity, _location, _phantomChildren, _requested, _requiredBy, _resolved, _shasum, _spec, _where, author, bugs, bundleDependencies, deprecated, description, engines, homepage, keywords, license, main, name, os, repository, scripts, version, default */
+/***/ (function(module) {
+
+module.exports = {"_from":"systeminformation","_id":"systeminformation@3.42.0","_inBundle":false,"_integrity":"sha512-njKStGHliiuD/S+UlRVkq5Mb+m3+7XOb8KJSRzg29G2NLBBKM//hveonwy/S3k1J9n6TfhWF8XJi6CLsVpHvyQ==","_location":"/systeminformation","_phantomChildren":{},"_requested":{"type":"tag","registry":true,"raw":"systeminformation","name":"systeminformation","escapedName":"systeminformation","rawSpec":"","saveSpec":null,"fetchSpec":"latest"},"_requiredBy":["#DEV:/","#USER"],"_resolved":"https://registry.npmjs.org/systeminformation/-/systeminformation-3.42.0.tgz","_shasum":"2b89617c5760adf35e6eb7c74edf4af4cd6502fb","_spec":"systeminformation","_where":"/Users/dangvanthanh/Code/dev/vue/vue-kanban","author":{"name":"Sebastian Hildebrandt","email":"hildebrandt@plus-innovations.com","url":"https://plus-innovations.com"},"bugs":{"url":"https://github.com/sebhildebrandt/systeminformation/issues"},"bundleDependencies":false,"deprecated":false,"description":"Simple system and OS information library","engines":{"node":">=4.0.0"},"homepage":"https://github.com/sebhildebrandt/systeminformation","keywords":["system information","sysinfo","monitor","monitoring","os","linux","osx","windows","freebsd","cpu","cpuload","memory","file system","fsstats","diskio","block devices","netstats","network","network connections","network stats","processes","users","internet","battery","docker","docker stats","docker processes","graphics","graphic card","graphic controller","display"],"license":"MIT","main":"./lib/index.js","name":"systeminformation","os":["darwin","linux","win32","freebsd","openbsd","sunos"],"repository":{"type":"git","url":"git+https://github.com/sebhildebrandt/systeminformation.git"},"scripts":{"test":"echo \"Error: no test specified\" && exit 1"},"version":"3.42.0"};
 
 /***/ }),
 
@@ -221,7 +6994,10 @@ var render = function() {
               }
             }
           }),
-          _c("Separator", { attrs: { vertical: "" } }),
+          _c("Separator", { attrs: { horizontal: "" } }),
+          _c("Button", { on: { click: _vm.increase } }, [_vm._v("Increase")]),
+          _c("Button", { on: { click: _vm.decrease } }, [_vm._v("Decrease")]),
+          _c("Text", [_vm._v(_vm._s(_vm.slider))]),
           _c("Slider", {
             attrs: { min: "0", max: "100", value: _vm.slider },
             on: {
@@ -238,7 +7014,16 @@ var render = function() {
               }
             }
           }),
-          _c("TimePicker")
+          _c("TimePicker"),
+          _c("Separator", { attrs: { horizontal: "" } }),
+          _c("Text", [_vm._v("Battery Metter")]),
+          _c("ProgressBar", { attrs: { value: _vm.batteryPercent } }),
+          _c("Text", [_vm._v(_vm._s(_vm.batteryPercent) + "%")]),
+          _vm.batteryIsCharging
+            ? _c("Text", [_vm._v("Charging")])
+            : _c("Text", [_vm._v("Not Charging")]),
+          _c("Text", [_vm._v("Cycle count: " + _vm._s(_vm.batteryCycle))]),
+          _c("Text", [_vm._v(_vm._s(_vm.batteryUpdateInfo))])
         ])
       ])
     ]
@@ -7948,6 +14733,50 @@ libui_node__WEBPACK_IMPORTED_MODULE_0___default.a.startLoop();
 
 /***/ }),
 
+/***/ "child_process":
+/*!********************************!*\
+  !*** external "child_process" ***!
+  \********************************/
+/*! no static exports found */
+/***/ (function(module, exports) {
+
+module.exports = require("child_process");
+
+/***/ }),
+
+/***/ "fs":
+/*!*********************!*\
+  !*** external "fs" ***!
+  \*********************/
+/*! no static exports found */
+/***/ (function(module, exports) {
+
+module.exports = require("fs");
+
+/***/ }),
+
+/***/ "http":
+/*!***********************!*\
+  !*** external "http" ***!
+  \***********************/
+/*! no static exports found */
+/***/ (function(module, exports) {
+
+module.exports = require("http");
+
+/***/ }),
+
+/***/ "https":
+/*!************************!*\
+  !*** external "https" ***!
+  \************************/
+/*! no static exports found */
+/***/ (function(module, exports) {
+
+module.exports = require("https");
+
+/***/ }),
+
 /***/ "libui-node":
 /*!*****************************!*\
   !*** external "libui-node" ***!
@@ -7956,6 +14785,28 @@ libui_node__WEBPACK_IMPORTED_MODULE_0___default.a.startLoop();
 /***/ (function(module, exports) {
 
 module.exports = require("libui-node");
+
+/***/ }),
+
+/***/ "net":
+/*!**********************!*\
+  !*** external "net" ***!
+  \**********************/
+/*! no static exports found */
+/***/ (function(module, exports) {
+
+module.exports = require("net");
+
+/***/ }),
+
+/***/ "os":
+/*!*********************!*\
+  !*** external "os" ***!
+  \*********************/
+/*! no static exports found */
+/***/ (function(module, exports) {
+
+module.exports = require("os");
 
 /***/ })
 

@@ -1,6 +1,8 @@
-# vue-monitoring
+# vue-kanban
 
-> Vue Monitoring
+> Vue Kanban Desktop App With [Vuido](https://vuido.mimec.org/)
+
+![](screenshot.png)
 
 ## Build Setup
 
