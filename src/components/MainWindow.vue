@@ -1,5 +1,5 @@
 <template>
-  <Window title="Vue Kanban" width="400" height="100" margined @close="exit">
+  <Window title="Vuido Kanban" width="400" height="100" margined @close="exit">
     <Group title="Tasks" margined>
       <Box padded>
         <Box horizontal padded>

@@ -400,7 +400,12 @@ var render = function() {
   return _c(
     "Window",
     {
-      attrs: { title: "Vue Kanban", width: "400", height: "100", margined: "" },
+      attrs: {
+        title: "Vuido Kanban",
+        width: "400",
+        height: "100",
+        margined: ""
+      },
       on: { close: _vm.exit }
     },
     [
