@@ -11,17 +11,17 @@
   "license": "MIT",
   "private": true,
   "dependencies": {
-    "vuido": "^0.1.1"
+    "vuido": "^0.1.2"
   },
   "devDependencies": {
     "babel-core": "^6.26.3",
     "babel-loader": "^7.1.4",
     "babel-preset-env": "^1.7.0",
-    "systeminformation": "^3.42.0",
+    "uuid": "^3.3.2",
     "vue-loader": "^15.2.4",
     "vue-template-compiler": "^2.5.16",
-    "vuido-template-compiler": "^0.1.1",
-    "webpack": "^4.10.2",
-    "webpack-cli": "^3.0.1"
+    "vuido-template-compiler": "^0.1.2",
+    "webpack": "^4.14.0",
+    "webpack-cli": "^3.0.8"
   }
 }
